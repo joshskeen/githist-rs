@@ -2,12 +2,13 @@ pub mod branching {
     use std::time::Duration;
     use chrono::{DateTime, NaiveDateTime, Utc};
     use git2::{BranchType, Repository};
+    use timeago::Formatter;
 
     #[derive(Debug)]
     pub struct BranchInfo {
         pub branch_name: String,
         pub last_commit_time: i64,
-        pub modified_date: String
+        pub time_ago: String,
     }
 
     pub struct BranchChangeFailureException;
@@ -48,11 +49,14 @@ pub mod branching {
             let last_commit_time = last_commit.time().seconds();
             let naive = NaiveDateTime::from_timestamp_opt(last_commit_time, 0).unwrap();
             let datetime: DateTime<Utc> = DateTime::from_utc(naive, Utc);
-            let modified_date = datetime.format("%Y-%m-%d %H:%M:%S").to_string();
+            let formatter = Formatter::new();
+            let now = Utc::now();
+            let time_ago = formatter.convert_chrono(datetime, now);
+
             result.push(BranchInfo {
                 branch_name,
                 last_commit_time,
-                modified_date
+                time_ago,
             });
         }
         result.sort_by_key(|d| d.last_commit_time);

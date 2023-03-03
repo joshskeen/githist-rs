@@ -3,6 +3,7 @@ use std::io::Stdout;
 use std::time::{Duration, Instant};
 use crossterm::event;
 use crossterm::event::{Event, KeyCode};
+use pad::PadStr;
 use tui::{Frame, Terminal};
 use tui::backend::{Backend, CrosstermBackend};
 use tui::layout::{Constraint, Direction, Layout};
@@ -171,7 +172,7 @@ impl App {
             .constraints([Constraint::Percentage(96), Constraint::Percentage(2), Constraint::Percentage(2)].as_ref())
             .direction(Direction::Vertical)
             .split(f.size());
-
+        let a = 5;
         let items: Vec<ListItem> = self
             .items
             .items
@@ -184,12 +185,15 @@ impl App {
                 }
             })
             .map(|branch_info| {
+                let branch_and_padding = branch_info.branch_name.pad_to_width(20);
                 let lines = vec![
-                    Spans::from(format!("last modified: {}, branch: {}", branch_info.modified_date, branch_info.branch_name)),
+
+                    Spans::from(format!("{},modified {}", branch_and_padding, branch_info.time_ago)),
                 ];
                 ListItem::new(lines).style(Style::default().fg(Color::Black).bg(Color::White))
             })
             .collect();
+
 
         self.select_first_item_if_none();
 
