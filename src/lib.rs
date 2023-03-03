@@ -16,24 +16,28 @@ use crate::ui::app_ui::restore_terminal;
 pub mod git;
 pub mod ui;
 
-pub struct StatefulList<T> {
+pub struct StatefulList {
     pub state: ListState,
-    pub items: Vec<T>,
+    pub items: Vec<BranchInfo>,
 }
 
 pub struct App {
-    pub items: StatefulList<BranchInfo>,
+    pub items: StatefulList,
     pub filter: String,
 }
 
 impl App {}
 
-impl<T> StatefulList<T> {
-    fn with_items(items: Vec<T>) -> StatefulList<T> {
+impl StatefulList {
+    fn with_items(items: Vec<BranchInfo>) -> StatefulList {
         StatefulList {
             state: ListState::default(),
             items,
         }
+    }
+
+    pub fn has_selected_branch(self, branch: &BranchInfo) -> bool {
+        return self.items.contains(branch);
     }
 
     pub fn unselect(&mut self) {
@@ -156,7 +160,8 @@ impl App {
                         // update the filter used to limit the vec of branches shown
                         KeyCode::Char(c) => {
                             self.filter.push(c);
-                            self.items.state.select(Some(0));
+                            // set the selection depending on if the old selected state is still visible.
+                            self.items.previous();
                         }
                         _ => {}
                     }
@@ -173,13 +178,14 @@ impl App {
             .constraints([Constraint::Percentage(96), Constraint::Percentage(2), Constraint::Percentage(2)].as_ref())
             .direction(Direction::Vertical)
             .split(f.size());
+
         let largest_string_len = self.items
             .items
             .iter()
             .map(|x| x.branch_name.len())
             .max().unwrap();
 
-        let items: Vec<ListItem> = self
+        let filtered_branches: Vec<&BranchInfo> = self
             .items
             .items
             .iter()
@@ -189,15 +195,17 @@ impl App {
                 } else {
                     item.branch_name.to_lowercase().contains(&self.filter.to_lowercase())
                 }
-            })
-            .map(|branch_info| {
-                let branch_and_padding = branch_info.branch_name.pad_to_width(largest_string_len);
-                let lines = vec![
-                    Spans::from(format!("{}   changed {}", branch_and_padding, branch_info.time_ago)),
-                ];
-                ListItem::new(lines).style(Style::default().fg(Color::Black).bg(Color::White))
-            })
+            }).collect();
+
+        let items: Vec<ListItem> = filtered_branches.iter().map(|branch_info| {
+            let branch_and_padding = branch_info.branch_name.pad_to_width(largest_string_len);
+            let lines = vec![
+                Spans::from(format!("{}   changed: {}", branch_and_padding, branch_info.time_ago)),
+            ];
+            ListItem::new(lines).style(Style::default().fg(Color::Black).bg(Color::White))
+        })
             .collect();
+
 
         let items = List::new(items)
             .block(Block::default().borders(Borders::ALL).title("choose recent branch"))
@@ -225,5 +233,9 @@ impl App {
             let status_para = Paragraph::new(status).block(block_2).wrap(Wrap { trim: true });
             f.render_widget(status_para, chunks[2]);
         }
+    }
+
+    fn set_selection(&self) {
+        todo!()
     }
 }

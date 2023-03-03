@@ -4,7 +4,7 @@ pub mod branching {
     use git2::{BranchType, Repository};
     use timeago::Formatter;
 
-    #[derive(Debug)]
+    #[derive(Debug, Eq, PartialEq)]
     pub struct BranchInfo {
         pub branch_name: String,
         pub last_commit_time: i64,
