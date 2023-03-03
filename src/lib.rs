@@ -10,6 +10,9 @@ use tui::style::{Color, Modifier, Style};
 use tui::text::{Span, Spans};
 use tui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
 use crate::git::branching::{BranchInfo, change_branch, Config};
+use chrono::prelude::*;
+use git2::Error;
+use crate::ui::app_ui::restore_terminal;
 
 pub mod git;
 pub mod ui;
@@ -105,8 +108,6 @@ impl App {
     ///
     /// Will return `Err` if `self.ui()` failed.
     ///
-    /// # Panics
-    /// will panic!
     pub fn run_app(
         &mut self,
         config: &Config,
@@ -128,7 +129,15 @@ impl App {
                                 Ok(name) => {
                                     println!("change branch to {name}");
                                     // deal with this if theres an error.
-                                    change_branch(config, &name).unwrap();
+                                    match change_branch(config, &name) {
+                                        Ok(_) => {
+
+                                        }
+                                        Err(error) => {
+                                            eprintln!("couldn't change branch. reason: {error}");
+                                            restore_terminal(terminal).expect("couldn't restore!");
+                                        }
+                                    }
                                 }
                                 Err(_) => {
                                     println!("no selection, nothing to do!");
@@ -161,7 +170,7 @@ impl App {
 
     fn ui<B: Backend>(&mut self, f: &mut Frame<B>) {
         let chunks = Layout::default()
-            .constraints([Constraint::Percentage(98), Constraint::Percentage(1), Constraint::Percentage(1)].as_ref())
+            .constraints([Constraint::Percentage(96), Constraint::Percentage(2), Constraint::Percentage(2)].as_ref())
             .direction(Direction::Vertical)
             .split(f.size());
 
@@ -173,11 +182,13 @@ impl App {
                 if self.filter.is_empty() {
                     true
                 } else {
-                    item.branch_name.contains(&self.filter)
+                    item.branch_name.to_lowercase().contains(&self.filter.to_lowercase())
                 }
             })
             .map(|branch_info| {
-                let lines = vec![Spans::from(branch_info.branch_name.to_string())];
+                let lines = vec![
+                    Spans::from(format!("last modified: {}, branch: {}", branch_info.modified_date, branch_info.branch_name)),
+                ];
                 ListItem::new(lines).style(Style::default().fg(Color::Black).bg(Color::White))
             })
             .collect();

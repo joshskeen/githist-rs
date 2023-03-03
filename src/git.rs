@@ -1,11 +1,13 @@
 pub mod branching {
     use std::time::Duration;
+    use chrono::{DateTime, NaiveDateTime, Utc};
     use git2::{BranchType, Repository};
 
     #[derive(Debug)]
     pub struct BranchInfo {
         pub branch_name: String,
         pub last_commit_time: i64,
+        pub modified_date: String
     }
 
     pub struct BranchChangeFailureException;
@@ -44,7 +46,14 @@ pub mod branching {
             let branch_name = branch_name.expect("no branch name!?").to_string();
             let last_commit = branch.get().peel_to_commit()?;
             let last_commit_time = last_commit.time().seconds();
-            result.push(BranchInfo { branch_name, last_commit_time });
+            let naive = NaiveDateTime::from_timestamp_opt(last_commit_time, 0).unwrap();
+            let datetime: DateTime<Utc> = DateTime::from_utc(naive, Utc);
+            let modified_date = datetime.format("%Y-%m-%d %H:%M:%S").to_string();
+            result.push(BranchInfo {
+                branch_name,
+                last_commit_time,
+                modified_date
+            });
         }
         result.sort_by_key(|d| d.last_commit_time);
         result.reverse();
@@ -63,7 +72,7 @@ pub mod branching {
     ///
     /// returns: Result<(), Error>
     pub fn change_branch(config: &Config, branch_name: &str) -> Result<(), git2::Error> {
-        let repo = Repository::open((*config).repo_path.to_string()).expect("cant open repo");
+        let repo = Repository::open(&config.repo_path).expect("cant open repo");
         let obj = repo.revparse_single(&("refs/heads/".to_owned() +
             branch_name))?;
         repo.checkout_tree(
