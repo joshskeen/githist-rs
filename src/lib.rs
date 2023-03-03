@@ -90,10 +90,6 @@ impl App {
         }
     }
 
-    pub fn update_filter(&mut self, filter: String) {
-        self.filter = filter;
-    }
-
     /// # Errors
     ///
     /// Will return `Err` if `self.ui()` failed.
@@ -134,6 +130,7 @@ impl App {
                         KeyCode::Backspace => {
                             self.filter.pop();
                         }
+                        // update the filter used to limit the vec of branches shown
                         KeyCode::Char(c) => {
                             self.filter.push(c);
                         }

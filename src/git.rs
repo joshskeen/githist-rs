@@ -8,13 +8,16 @@ pub mod branching {
         pub last_commit_time: i64,
     }
 
+    pub struct BranchChangeFailureException;
+
     pub struct Config {
         pub repo_path: String,
         pub tick_rate: Duration,
     }
 
     impl Config {
-        pub fn new(args: Vec<String>) -> Config {
+        #[must_use]
+        pub fn new(args: &[String]) -> Config {
             let path = if let Some(path) = &args.get(1) {
                 path.to_string()
             } else {
@@ -28,9 +31,12 @@ pub mod branching {
         }
     }
 
+    /// # Errors
+    ///
+    /// Will return `git2::Error` if not a valid repo.
     pub fn get_branch_names(config: &Config) -> Result<Vec<BranchInfo>, git2::Error> {
         let mut result = Vec::new();
-        let repo = Repository::open((*config).repo_path.to_string())?;
+        let repo = Repository::open(&config.repo_path)?;
         let branches = repo.branches(Some(BranchType::Local))?;
         for branch in branches {
             let (branch, _) = branch?;
@@ -38,21 +44,33 @@ pub mod branching {
             let branch_name = branch_name.expect("no branch name!?").to_string();
             let last_commit = branch.get().peel_to_commit()?;
             let last_commit_time = last_commit.time().seconds();
-            result.push(BranchInfo { branch_name, last_commit_time })
+            result.push(BranchInfo { branch_name, last_commit_time });
         }
         result.sort_by_key(|d| d.last_commit_time);
         result.reverse();
         Ok(result)
     }
 
-    pub fn change_branch(config: &Config, branch_name: &str) {
+
+    /// # Errors
+    ///
+    /// Will return `git2::Error` if branch change failed.
+    ///
+    /// # Arguments
+    ///
+    /// * `config`: configuration for the app
+    /// * `branch_name`: branch name to change to
+    ///
+    /// returns: Result<(), Error>
+    pub fn change_branch(config: &Config, branch_name: &str) -> Result<(), git2::Error> {
         let repo = Repository::open((*config).repo_path.to_string()).expect("cant open repo");
         let obj = repo.revparse_single(&("refs/heads/".to_owned() +
-            branch_name)).unwrap();
+            branch_name))?;
         repo.checkout_tree(
             &obj,
             None,
-        ).unwrap();
-        repo.set_head(&("refs/heads/".to_owned() + branch_name)).unwrap();
+        )?;
+        repo.set_head(&("refs/heads/".to_owned() + branch_name))?;
+        Ok(())
     }
 }
