@@ -21,6 +21,7 @@ pub struct StatefulList<T> {
 
 pub struct App {
     pub items: StatefulList<BranchInfo>,
+    pub filter: String,
 }
 
 impl<T> StatefulList<T> {
@@ -30,6 +31,7 @@ impl<T> StatefulList<T> {
             items,
         }
     }
+
     pub fn unselect(&mut self) {
         self.state.select(None);
     }
@@ -65,9 +67,11 @@ impl<T> StatefulList<T> {
 pub struct NoSelectionError;
 
 impl App {
+    #[must_use]
     pub fn new(branches: Vec<BranchInfo>) -> App {
         App {
-            items: StatefulList::with_items(branches)
+            items: StatefulList::with_items(branches),
+            filter: String::new(),
         }
     }
 
@@ -84,6 +88,10 @@ impl App {
                 Ok(self.items.items[index].branch_name.to_string())
             }
         }
+    }
+
+    pub fn update_filter(&mut self, filter: String) {
+        self.filter = filter;
     }
 
     /// # Errors
@@ -122,6 +130,12 @@ impl App {
                         KeyCode::Left => self.items.unselect(),
                         KeyCode::Down => self.items.next(),
                         KeyCode::Up => self.items.previous(),
+                        KeyCode::Backspace => {
+                            self.filter.pop();
+                        }
+                        KeyCode::Char(c) => {
+                            self.filter.push(c);
+                        }
                         _ => {}
                     }
                 }
@@ -133,7 +147,6 @@ impl App {
     }
 
     fn ui<B: Backend>(&mut self, f: &mut Frame<B>) {
-        // Create two chunks with equal horizontal screen space
         let chunks = Layout::default()
             .constraints([Constraint::Percentage(100)].as_ref())
             .direction(Direction::Horizontal)
@@ -143,13 +156,19 @@ impl App {
             .items
             .items
             .iter()
+            .filter(|item| {
+                if self.filter.is_empty() {
+                    true
+                } else {
+                    item.branch_name.contains(&self.filter)
+                }
+            })
             .map(|branch_info| {
                 let lines = vec![Spans::from(branch_info.branch_name.to_string())];
                 ListItem::new(lines).style(Style::default().fg(Color::Black).bg(Color::White))
             })
             .collect();
 
-        // Create a List from all list items and highlight the currently selected one
         let items = List::new(items)
             .block(Block::default().borders(Borders::ALL).title("choose recent branch"))
             .highlight_style(
@@ -159,7 +178,6 @@ impl App {
             )
             .highlight_symbol(">> ");
 
-        // We can now render the item list
         f.render_stateful_widget(items, chunks[0], &mut self.items.state);
     }
 }
