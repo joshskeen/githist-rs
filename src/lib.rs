@@ -1,19 +1,18 @@
-pub mod git_fns;
-pub mod ui;
-
 use std::io;
 use std::io::Stdout;
 use std::time::{Duration, Instant};
-use tui::widgets::{Block, Borders, List, ListItem, ListState};
-use crossterm::{event, terminal::{disable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen}};
+use crossterm::event;
 use crossterm::event::{Event, KeyCode};
-use tui::backend::{Backend, CrosstermBackend};
 use tui::{Frame, Terminal};
+use tui::backend::{Backend, CrosstermBackend};
 use tui::layout::{Constraint, Direction, Layout};
 use tui::style::{Color, Modifier, Style};
 use tui::text::Spans;
-use crate::git_fns::git_fns::{BranchInfo, change_branch, Config};
+use tui::widgets::{Block, Borders, List, ListItem, ListState};
+use crate::git::branching::{BranchInfo, change_branch, Config};
 
+pub mod git;
+pub mod ui;
 
 pub struct StatefulList<T> {
     pub state: ListState,
@@ -65,13 +64,16 @@ impl<T> StatefulList<T> {
 
 pub struct NoSelectionError;
 
-impl<'a> App {
+impl App {
     pub fn new(branches: Vec<BranchInfo>) -> App {
         App {
             items: StatefulList::with_items(branches)
         }
     }
 
+    /// # Errors
+    ///
+    /// Will return `NoSelectionError` if a branch was not selected.
     pub fn get_selected_branch_name(&mut self) -> Result<String, NoSelectionError> {
         let option = self.items.state.selected();
         match option {
@@ -84,6 +86,9 @@ impl<'a> App {
         }
     }
 
+    /// # Errors
+    ///
+    /// Will return `Err` if `self.ui()` failed.
     pub fn run_app(
         &mut self,
         config: &Config,
@@ -106,12 +111,12 @@ impl<'a> App {
                                     change_branch(config, &name);
                                 }
                                 Err(_) => {
-                                    println!("no selection, nothing to do!")
+                                    println!("no selection, nothing to do!");
                                 }
                             }
                             return Ok(());
                         }
-                        KeyCode::Char('q') => {
+                        KeyCode::Char('Q') => {
                             return Ok(());
                         }
                         KeyCode::Left => self.items.unselect(),

@@ -1,4 +1,4 @@
-pub mod git_fns {
+pub mod branching {
     use std::time::Duration;
     use git2::{BranchType, Repository};
 
@@ -27,7 +27,6 @@ pub mod git_fns {
             }
         }
     }
-
 
     pub fn get_branch_names(config: &Config) -> Result<Vec<BranchInfo>, git2::Error> {
         let mut result = Vec::new();
