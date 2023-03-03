@@ -7,11 +7,9 @@ use tui::{Frame, Terminal};
 use tui::backend::{Backend, CrosstermBackend};
 use tui::layout::{Constraint, Direction, Layout};
 use tui::style::{Color, Modifier, Style};
-use tui::text::{Span, Spans};
+use tui::text::{Spans};
 use tui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
 use crate::git::branching::{BranchInfo, change_branch, Config};
-use chrono::prelude::*;
-use git2::Error;
 use crate::ui::app_ui::restore_terminal;
 
 pub mod git;
@@ -130,12 +128,12 @@ impl App {
                                     println!("change branch to {name}");
                                     // deal with this if theres an error.
                                     match change_branch(config, &name) {
-                                        Ok(_) => {
-
-                                        }
+                                        Ok(_) => {}
                                         Err(error) => {
-                                            eprintln!("couldn't change branch. reason: {error}");
+                                            // restore the terminal, then print the error if one occurred
+                                            // while changing branch.
                                             restore_terminal(terminal).expect("couldn't restore!");
+                                            eprintln!("couldn't change branch. reason: {error}");
                                         }
                                     }
                                 }

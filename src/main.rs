@@ -1,6 +1,5 @@
 use std::{env, io};
 use std::error::Error;
-use std::ops::Index;
 use tui::backend::{CrosstermBackend};
 use tui::{Terminal};
 use githist::App;
