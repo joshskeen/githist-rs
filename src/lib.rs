@@ -156,6 +156,7 @@ impl App {
                         // update the filter used to limit the vec of branches shown
                         KeyCode::Char(c) => {
                             self.filter.push(c);
+                            self.items.state.select(Some(0));
                         }
                         _ => {}
                     }
@@ -172,7 +173,12 @@ impl App {
             .constraints([Constraint::Percentage(96), Constraint::Percentage(2), Constraint::Percentage(2)].as_ref())
             .direction(Direction::Vertical)
             .split(f.size());
-        let a = 5;
+        let largest_string_len = self.items
+            .items
+            .iter()
+            .map(|x| x.branch_name.len())
+            .max().unwrap();
+
         let items: Vec<ListItem> = self
             .items
             .items
@@ -185,17 +191,13 @@ impl App {
                 }
             })
             .map(|branch_info| {
-                let branch_and_padding = branch_info.branch_name.pad_to_width(20);
+                let branch_and_padding = branch_info.branch_name.pad_to_width(largest_string_len);
                 let lines = vec![
-
-                    Spans::from(format!("{},modified {}", branch_and_padding, branch_info.time_ago)),
+                    Spans::from(format!("{}   changed {}", branch_and_padding, branch_info.time_ago)),
                 ];
                 ListItem::new(lines).style(Style::default().fg(Color::Black).bg(Color::White))
             })
             .collect();
-
-
-        self.select_first_item_if_none();
 
         let items = List::new(items)
             .block(Block::default().borders(Borders::ALL).title("choose recent branch"))
