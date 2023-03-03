@@ -7,8 +7,8 @@ use tui::{Frame, Terminal};
 use tui::backend::{Backend, CrosstermBackend};
 use tui::layout::{Constraint, Direction, Layout};
 use tui::style::{Color, Modifier, Style};
-use tui::text::Spans;
-use tui::widgets::{Block, Borders, List, ListItem, ListState};
+use tui::text::{Span, Spans};
+use tui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
 use crate::git::branching::{BranchInfo, change_branch, Config};
 
 pub mod git;
@@ -104,6 +104,9 @@ impl App {
     /// # Errors
     ///
     /// Will return `Err` if `self.ui()` failed.
+    ///
+    /// # Panics
+    /// will panic!
     pub fn run_app(
         &mut self,
         config: &Config,
@@ -124,7 +127,8 @@ impl App {
                             match branch_name {
                                 Ok(name) => {
                                     println!("change branch to {name}");
-                                    change_branch(config, &name);
+                                    // deal with this if theres an error.
+                                    change_branch(config, &name).unwrap();
                                 }
                                 Err(_) => {
                                     println!("no selection, nothing to do!");
@@ -157,8 +161,8 @@ impl App {
 
     fn ui<B: Backend>(&mut self, f: &mut Frame<B>) {
         let chunks = Layout::default()
-            .constraints([Constraint::Percentage(100)].as_ref())
-            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(98), Constraint::Percentage(1), Constraint::Percentage(1)].as_ref())
+            .direction(Direction::Vertical)
             .split(f.size());
 
         let items: Vec<ListItem> = self
@@ -189,6 +193,22 @@ impl App {
             )
             .highlight_symbol(">> ");
 
+        let block = Block::default().borders(Borders::NONE);
+        let instructions_text = "Q to exit. ↓/↑ to choose branch, ↩ to change to selected branch. type to filter branches.";
+        let instructions_para = Paragraph::new(instructions_text).block(block).wrap(Wrap { trim: true });
+
+        // list of branches
         f.render_stateful_widget(items, chunks[0], &mut self.items.state);
+
+        // instructions
+        f.render_widget(instructions_para, chunks[1]);
+
+        // status
+        if !self.filter.is_empty() {
+            let status = format!("filter: {}", self.filter);
+            let block_2 = Block::default().borders(Borders::NONE);
+            let status_para = Paragraph::new(status).block(block_2).wrap(Wrap { trim: true });
+            f.render_widget(status_para, chunks[2]);
+        }
     }
 }
