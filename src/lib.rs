@@ -24,6 +24,8 @@ pub struct App {
     pub filter: String,
 }
 
+impl App {}
+
 impl<T> StatefulList<T> {
     fn with_items(items: Vec<T>) -> StatefulList<T> {
         StatefulList {
@@ -72,6 +74,15 @@ impl App {
         App {
             items: StatefulList::with_items(branches),
             filter: String::new(),
+        }
+    }
+    pub fn select_first_item_if_none(&mut self) {
+        match self.items.state.selected() {
+            None => {
+                // no selection. select the first.
+                self.items.state.select(Some(0));
+            }
+            Some(_) => {}
         }
     }
 
@@ -166,6 +177,8 @@ impl App {
                 ListItem::new(lines).style(Style::default().fg(Color::Black).bg(Color::White))
             })
             .collect();
+
+        self.select_first_item_if_none();
 
         let items = List::new(items)
             .block(Block::default().borders(Borders::ALL).title("choose recent branch"))

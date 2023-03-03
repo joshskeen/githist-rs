@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             setup_terminal();
             let vec = result;
             let mut app = App::new(vec);
-            app.items.state.select(Some(0));
+            app.select_first_item_if_none();
             let res = app.run_app(&config, &mut terminal);
             if let Err(err) = res {
                 eprintln!("{err:?}");
