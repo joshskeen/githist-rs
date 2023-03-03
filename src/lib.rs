@@ -116,6 +116,7 @@ impl App {
                             let branch_name = self.get_selected_branch_name();
                             match branch_name {
                                 Ok(name) => {
+                                    println!("change branch to {name}");
                                     change_branch(config, &name);
                                 }
                                 Err(_) => {
