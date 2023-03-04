@@ -74,7 +74,7 @@ pub mod branching {
     ///
     /// # Arguments
     ///
-    /// * `config`: configuration for the app
+    /// * `config`: configuration for the ui
     /// * `branch_name`: branch name to change to
     ///
     /// returns: Result<(), Error>

@@ -4,7 +4,7 @@ use tui::backend::{CrosstermBackend};
 use tui::{Terminal};
 use githist::App;
 use githist::git::branching::{Config, get_branch_names};
-use githist::ui::app_ui::{restore_terminal, setup_terminal};
+use githist::ui::gui::{restore_terminal, setup_terminal};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
