@@ -115,7 +115,8 @@ impl App {
                 Err(NoSelectionError)
             }
             Some(index) => {
-                Ok(self.items.items[index].branch_name.to_string())
+                let x = self.items.filtered.clone().unwrap().to_vec();
+                Ok(x[index].branch_name.to_string())
             }
         }
     }
@@ -235,6 +236,7 @@ impl App {
     }
 
     fn update_filtered(&mut self) {
+        self.items.state.select(Some(0));
         let filtered: Vec<BranchInfo>= self.items.items.clone().into_iter().filter(|x| {
             if self.filter.is_empty() {
                 true
