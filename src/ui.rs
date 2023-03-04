@@ -41,12 +41,13 @@ pub mod gui {
                 .direction(Direction::Vertical)
                 .split(f.size());
 
-            let largest_string_len = self.items.filtered.clone().unwrap()
+            // get the longest of all the branch names including ones not currently displayed necessarily.
+            let largest_string_len = self.items.items
                 .iter()
                 .map(|x| x.branch_name.len())
                 .max().unwrap();
 
-            let items: Vec<ListItem> = self.items.filtered.clone().unwrap().into_iter().map(|branch_info| {
+            let items: Vec<ListItem> = self.items.filtered.clone().unwrap_or(Box::default()).into_iter().map(|branch_info| {
                 let branch_and_padding = branch_info.branch_name.pad_to_width(largest_string_len);
                 let lines = vec![
                     Spans::from(format!("{}   changed: {}", branch_and_padding, branch_info.time_ago)),

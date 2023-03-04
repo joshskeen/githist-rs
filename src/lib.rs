@@ -99,7 +99,6 @@ impl App {
     }
 
     fn update_filtered(&mut self) {
-        self.items.state.select(Some(0));
         let filtered: Vec<BranchInfo> = self.items.items.clone().into_iter().filter(|x| {
             if self.filter.is_empty() {
                 true
@@ -107,9 +106,12 @@ impl App {
                 x.branch_name.to_lowercase().contains(&self.filter)
             }
         }).collect();
-
-        self.items.filtered = Some(
-            Box::new(filtered)
-        );
+        self.items.filtered = if filtered.is_empty() {
+            self.items.state.select(None);
+            None
+        } else {
+            self.items.state.select(Some(0));
+            Some(Box::new(filtered))
+        };
     }
 }
