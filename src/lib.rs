@@ -1,7 +1,6 @@
 use std::cell::{Cell};
-use std::{clone, io};
+use std::{io};
 use std::io::Stdout;
-use std::ops::{IndexMut};
 use std::time::{Duration, Instant};
 use crossterm::event;
 use crossterm::event::{Event, KeyCode};
