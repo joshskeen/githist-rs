@@ -4,7 +4,7 @@ pub mod branching {
     use git2::{BranchType, Repository};
     use timeago::Formatter;
 
-    #[derive(Debug, Eq, PartialEq)]
+    #[derive(Debug, Eq, PartialEq, Clone)]
     pub struct BranchInfo {
         pub branch_name: String,
         pub last_commit_time: i64,
@@ -22,14 +22,14 @@ pub mod branching {
         #[must_use]
         pub fn new(args: &[String]) -> Config {
             let path = if let Some(path) = &args.get(1) {
-                path.to_string()
+                (*path).to_string()
             } else {
                 String::from(".")
             };
 
             Config {
                 tick_rate: Duration::from_millis(250),
-                repo_path: path.to_string(),
+                repo_path: (*path).to_string(),
             }
         }
     }
@@ -37,6 +37,9 @@ pub mod branching {
     /// # Errors
     ///
     /// Will return `git2::Error` if not a valid repo.
+    ///
+    /// # Panics
+    /// if the naive date unwrap fails.
     pub fn get_branch_names(config: &Config) -> Result<Vec<BranchInfo>, git2::Error> {
         let mut result = Vec::new();
         let repo = Repository::open(&config.repo_path)?;

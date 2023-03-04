@@ -1,5 +1,7 @@
-use std::io;
+use std::cell::{Cell};
+use std::{clone, io};
 use std::io::Stdout;
+use std::ops::{IndexMut};
 use std::time::{Duration, Instant};
 use crossterm::event;
 use crossterm::event::{Event, KeyCode};
@@ -19,6 +21,7 @@ pub mod ui;
 pub struct StatefulList {
     pub state: ListState,
     pub items: Vec<BranchInfo>,
+    pub filtered: Option<Box<Vec<BranchInfo>>>
 }
 
 pub struct App {
@@ -26,27 +29,37 @@ pub struct App {
     pub filter: String,
 }
 
-impl App {}
-
 impl StatefulList {
+    fn filtered_items(&self, filter: String) -> Vec<&BranchInfo> {
+        let x: Vec<&BranchInfo> = self.items.iter().filter(|item| {
+            if filter.is_empty() {
+                true
+            } else {
+                item.branch_name.to_lowercase().contains(&filter.to_lowercase())
+            }
+        }).collect();
+        return x.clone();
+    }
+
     fn with_items(items: Vec<BranchInfo>) -> StatefulList {
+
+        let filtered = Some(Box::new(items.clone()));
+
         StatefulList {
             state: ListState::default(),
             items,
+            filtered
         }
-    }
-
-    pub fn has_selected_branch(self, branch: &BranchInfo) -> bool {
-        return self.items.contains(branch);
     }
 
     pub fn unselect(&mut self) {
         self.state.select(None);
     }
+
     pub fn next(&mut self) {
         let i = match self.state.selected() {
             Some(i) => {
-                if i >= self.items.len() - 1 {
+               if i >= self.filtered.clone().unwrap().len() - 1 {
                     0
                 } else {
                     i + 1
@@ -54,7 +67,8 @@ impl StatefulList {
             }
             None => 0,
         };
-        self.state.select(Some(i));
+        let mut x = Cell::new(&mut self.state);
+        x.get_mut().select(Some(i));
     }
 
     pub fn previous(&mut self) {
@@ -156,12 +170,12 @@ impl App {
                         KeyCode::Up => self.items.previous(),
                         KeyCode::Backspace => {
                             self.filter.pop();
+                            self.update_filtered();
                         }
                         // update the filter used to limit the vec of branches shown
                         KeyCode::Char(c) => {
                             self.filter.push(c);
-                            // set the selection depending on if the old selected state is still visible.
-                            self.items.previous();
+                            self.update_filtered();
                         }
                         _ => {}
                     }
@@ -179,25 +193,12 @@ impl App {
             .direction(Direction::Vertical)
             .split(f.size());
 
-        let largest_string_len = self.items
-            .items
+        let largest_string_len = self.items.filtered.clone().unwrap()
             .iter()
             .map(|x| x.branch_name.len())
             .max().unwrap();
 
-        let filtered_branches: Vec<&BranchInfo> = self
-            .items
-            .items
-            .iter()
-            .filter(|item| {
-                if self.filter.is_empty() {
-                    true
-                } else {
-                    item.branch_name.to_lowercase().contains(&self.filter.to_lowercase())
-                }
-            }).collect();
-
-        let items: Vec<ListItem> = filtered_branches.iter().map(|branch_info| {
+        let items: Vec<ListItem>= self.items.filtered.clone().unwrap().into_iter().map(|branch_info| {
             let branch_and_padding = branch_info.branch_name.pad_to_width(largest_string_len);
             let lines = vec![
                 Spans::from(format!("{}   changed: {}", branch_and_padding, branch_info.time_ago)),
@@ -205,7 +206,6 @@ impl App {
             ListItem::new(lines).style(Style::default().fg(Color::Black).bg(Color::White))
         })
             .collect();
-
 
         let items = List::new(items)
             .block(Block::default().borders(Borders::ALL).title("choose recent branch"))
@@ -235,7 +235,17 @@ impl App {
         }
     }
 
-    fn set_selection(&self) {
-        todo!()
+    fn update_filtered(&mut self) {
+        let filtered: Vec<BranchInfo>= self.items.items.clone().into_iter().filter(|x| {
+            if self.filter.is_empty() {
+                true
+            } else {
+                x.branch_name.to_lowercase().contains(&self.filter)
+            }
+        }).collect();
+
+        self.items.filtered = Some(
+            Box::new(filtered)
+        );
     }
 }
