@@ -3,9 +3,13 @@ name = "githist"
 version = "0.1.0"
 authors = ["Josh Skeen <josh@joshskeen.com>"]
 license = "MIT OR Apache-2.0"
-description = "a tui for switching between branches"
+homepage = "https://github.com/joshskeen/githist-rs"
+repository = "https://github.com/joshskeen/githist-rs"
+description = "a text user interface for switching between recent branches"
 readme = "README.md"
 edition = "2021"
+keywords = ["tui", "git", "cli"]
+categories = ["command-line-utilities"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -13,7 +17,6 @@ edition = "2021"
 tui = "0.19"
 crossterm = "0.26.1"
 git2 = "0.16.1"
-clap = "4.1.8"
 chrono = "0.4.23"
 timeago = "0.4.1"
 pad = "0.1.6"
