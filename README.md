@@ -1,4 +1,9 @@
-## githist
+# Githist &emsp; [![Latest Version]][crates.io]
+
+[Latest Version]: https://img.shields.io/crates/v/githist.svg
+[crates.io]: https://crates.io/crates/githist
+
+A text user interface for moving between recent branches in a git repository.
 
 usage: githist followed by an optional path to a repo, defaulting on the working directory. 
 
