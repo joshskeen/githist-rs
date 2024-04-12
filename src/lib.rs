@@ -1,5 +1,8 @@
-use tui::widgets::ListState;
 use crate::git::branching::BranchInfo;
+use ratatui::backend::CrosstermBackend;
+use ratatui::widgets::ListState;
+use ratatui::Terminal;
+use std::io::Stdout;
 
 pub mod git;
 pub mod ui;
@@ -13,6 +16,7 @@ pub struct StatefulList {
 pub struct App {
     pub items: StatefulList,
     pub filter: String,
+    pub pending: String,
 }
 
 impl StatefulList {
@@ -68,6 +72,7 @@ impl App {
         App {
             items: StatefulList::with_items(branches),
             filter: String::new(),
+            pending: String::new(),
         }
     }
     pub fn select_first_item_if_none(&mut self) {
@@ -88,9 +93,7 @@ impl App {
     pub fn get_selected_branch_name(&mut self) -> Result<String, NoSelectionError> {
         let option = self.items.state.selected();
         match option {
-            None => {
-                Err(NoSelectionError)
-            }
+            None => Err(NoSelectionError),
             Some(index) => {
                 let x = self.items.filtered.clone().unwrap().to_vec();
                 Ok(x[index].branch_name.to_string())
@@ -98,14 +101,31 @@ impl App {
         }
     }
 
+    pub fn update_with_status(
+        &mut self,
+        terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+        pending_status: String,
+    ) {
+        self.filter.clear();
+        self.pending = pending_status.clone();
+        // println!("{}", pending_status.clone());
+        terminal.draw(|f| self.ui(f)).expect("error updating!");
+    }
+
     fn update_filtered(&mut self) {
-        let filtered: Vec<BranchInfo> = self.items.items.clone().into_iter().filter(|x| {
-            if self.filter.is_empty() {
-                true
-            } else {
-                x.branch_name.to_lowercase().contains(&self.filter)
-            }
-        }).collect();
+        let filtered: Vec<BranchInfo> = self
+            .items
+            .items
+            .clone()
+            .into_iter()
+            .filter(|x| {
+                if self.filter.is_empty() {
+                    true
+                } else {
+                    x.branch_name.to_lowercase().contains(&self.filter)
+                }
+            })
+            .collect();
         self.items.filtered = if filtered.is_empty() {
             self.items.state.select(None);
             None

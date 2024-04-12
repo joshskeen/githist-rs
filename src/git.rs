@@ -1,7 +1,7 @@
 pub mod branching {
-    use std::time::Duration;
     use chrono::{DateTime, NaiveDateTime, Utc};
     use git2::{BranchType, Repository};
+    use std::time::Duration;
     use timeago::Formatter;
 
     #[derive(Debug, Eq, PartialEq, Clone)]
@@ -67,7 +67,6 @@ pub mod branching {
         Ok(result)
     }
 
-
     /// # Errors
     ///
     /// Will return `git2::Error` if branch change failed.
@@ -80,12 +79,8 @@ pub mod branching {
     /// returns: Result<(), Error>
     pub fn change_branch(config: &Config, branch_name: &str) -> Result<(), git2::Error> {
         let repo = Repository::open(&config.repo_path).expect("cant open repo");
-        let obj = repo.revparse_single(&("refs/heads/".to_owned() +
-            branch_name))?;
-        repo.checkout_tree(
-            &obj,
-            None,
-        )?;
+        let obj = repo.revparse_single(&("refs/heads/".to_owned() + branch_name))?;
+        repo.checkout_tree(&obj, None)?;
         repo.set_head(&("refs/heads/".to_owned() + branch_name))?;
         Ok(())
     }
