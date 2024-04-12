@@ -1,10 +1,10 @@
-use std::{env, io};
-use std::error::Error;
-use tui::backend::{CrosstermBackend};
-use tui::{Terminal};
-use githist::App;
-use githist::git::branching::{Config, get_branch_names};
+use githist::git::branching::{get_branch_names, Config};
 use githist::ui::gui::{restore_terminal, setup_terminal};
+use githist::App;
+use ratatui::backend::CrosstermBackend;
+use ratatui::Terminal;
+use std::error::Error;
+use std::{env, io};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
