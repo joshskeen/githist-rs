@@ -17,6 +17,7 @@ pub struct App {
     pub items: StatefulList,
     pub filter: String,
     pub pending: String,
+    pub delete_confirmation: Option<String>,
 }
 
 impl StatefulList {
@@ -73,6 +74,7 @@ impl App {
             items: StatefulList::with_items(branches),
             filter: String::new(),
             pending: String::new(),
+            delete_confirmation: None,
         }
     }
     pub fn select_first_item_if_none(&mut self) {
@@ -107,8 +109,20 @@ impl App {
         pending_status: String,
     ) {
         self.filter.clear();
-        self.pending = pending_status.clone();
-        // println!("{}", pending_status.clone());
+        self.update_with_status_preserve_filter(terminal, pending_status);
+    }
+
+    pub fn update_with_status_preserve_filter(
+        &mut self,
+        terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+        pending_status: String,
+    ) {
+        self.pending = pending_status;
+        terminal.draw(|f| self.ui(f)).expect("error updating!");
+    }
+
+    pub fn clear_pending_status(&mut self, terminal: &mut Terminal<CrosstermBackend<Stdout>>) {
+        self.pending.clear();
         terminal.draw(|f| self.ui(f)).expect("error updating!");
     }
 
@@ -133,5 +147,10 @@ impl App {
             self.items.state.select(Some(0));
             Some(Box::new(filtered))
         };
+    }
+
+    pub fn set_branches(&mut self, branches: Vec<BranchInfo>) {
+        self.items.items = branches;
+        self.update_filtered();
     }
 }

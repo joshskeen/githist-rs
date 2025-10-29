@@ -86,7 +86,7 @@ pub mod gui {
                 .highlight_symbol(">> ");
 
             let block = Block::default().borders(Borders::NONE);
-            let instructions_text = "Q to exit. ↓/↑ to choose branch, ↩ to change to selected branch. type to filter branches.";
+            let instructions_text = "Q to exit. ↓/↑ to choose branch, ↩ to change to selected branch, Shift+D to delete branch (Y/N to confirm). type to filter branches.";
             let instructions_para = Paragraph::new(instructions_text)
                 .block(block)
                 .wrap(Wrap { trim: true });

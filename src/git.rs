@@ -1,5 +1,5 @@
 pub mod branching {
-    use chrono::{DateTime, NaiveDateTime, Utc};
+    use chrono::{DateTime, Utc};
     use git2::{BranchType, Repository};
     use std::time::Duration;
     use timeago::Formatter;
@@ -50,8 +50,8 @@ pub mod branching {
             let branch_name = branch_name.expect("no branch name!?").to_string();
             let last_commit = branch.get().peel_to_commit()?;
             let last_commit_time = last_commit.time().seconds();
-            let naive = NaiveDateTime::from_timestamp_opt(last_commit_time, 0).unwrap();
-            let datetime: DateTime<Utc> = DateTime::from_utc(naive, Utc);
+            let datetime: DateTime<Utc> =
+                DateTime::from_timestamp(last_commit_time, 0).expect("invalid commit timestamp");
             let formatter = Formatter::new();
             let now = Utc::now();
             let time_ago = formatter.convert_chrono(datetime, now);
@@ -83,5 +83,14 @@ pub mod branching {
         repo.checkout_tree(&obj, None)?;
         repo.set_head(&("refs/heads/".to_owned() + branch_name))?;
         Ok(())
+    }
+
+    /// # Errors
+    ///
+    /// Will return `git2::Error` if branch deletion failed.
+    pub fn delete_branch(config: &Config, branch_name: &str) -> Result<(), git2::Error> {
+        let repo = Repository::open(&config.repo_path)?;
+        let mut branch = repo.find_branch(branch_name, BranchType::Local)?;
+        branch.delete()
     }
 }
