@@ -10,7 +10,7 @@ pub mod gui {
     use ratatui::backend::CrosstermBackend;
     use ratatui::layout::{Constraint, Direction, Layout};
     use ratatui::style::{Color, Modifier, Style};
-    use ratatui::text::Span;
+    use ratatui::text::{Line, Span};
     use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
     use ratatui::{Frame, Terminal};
     use std::io;
@@ -62,21 +62,52 @@ pub mod gui {
                 .unwrap_or_default()
                 .into_iter()
                 .map(|branch_info| {
+                    let head_marker = if branch_info.is_head { "* " } else { "  " };
                     let branch_and_padding =
                         branch_info.branch_name.pad_to_width(largest_string_len);
-                    let item = Span::from(format!(
-                        "{}   changed: {}",
-                        branch_and_padding, branch_info.time_ago
-                    ));
-                    ListItem::new(item).style(Style::default().fg(Color::Black).bg(Color::White))
+                    let remote_info = branch_info
+                        .remote_tracking
+                        .as_deref()
+                        .map_or(String::new(), |r| format!(" [{r}]"));
+
+                    let mut spans = vec![
+                        Span::styled(
+                            head_marker,
+                            if branch_info.is_head {
+                                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                            } else {
+                                Style::default()
+                            },
+                        ),
+                        Span::raw(format!(
+                            "{}   changed: {}",
+                            branch_and_padding, branch_info.time_ago
+                        )),
+                    ];
+                    if !remote_info.is_empty() {
+                        spans.push(Span::styled(
+                            remote_info,
+                            Style::default().fg(Color::Cyan),
+                        ));
+                    }
+
+                    ListItem::new(Line::from(spans))
+                        .style(Style::default().fg(Color::Black).bg(Color::White))
                 })
                 .collect();
 
+            let count_info = if self.filtered_len() == self.total_len() {
+                format!("{} branches", self.total_len())
+            } else {
+                format!("{}/{} branches", self.filtered_len(), self.total_len())
+            };
+
+            let title = format!("choose recent branch  ({count_info})");
             let items = List::new(items)
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .title("choose recent branch"),
+                        .title(title),
                 )
                 .highlight_style(
                     Style::default()
@@ -85,10 +116,10 @@ pub mod gui {
                 )
                 .highlight_symbol(">> ");
 
-            let block = Block::default().borders(Borders::NONE);
-            let instructions_text = "Q to exit. ↓/↑ to choose branch, ↩ to change to selected branch, Shift+D to delete branch (Y/N to confirm). type to filter branches.";
+            let instructions_text =
+                "q/Esc: quit | j/k/↓/↑: navigate | ↩: switch branch | Shift+D: delete | /: filter | g/G: first/last | PgUp/PgDn: page";
             let instructions_para = Paragraph::new(instructions_text)
-                .block(block)
+                .block(Block::default().borders(Borders::NONE))
                 .wrap(Wrap { trim: true });
 
             // list of branches
@@ -97,22 +128,20 @@ pub mod gui {
             // instructions
             f.render_widget(instructions_para, chunks[1]);
 
-            // status
-            if !self.filter.is_empty() {
-                let status = format!("filter: {}", self.filter);
-                let block_2 = Block::default().borders(Borders::NONE);
-                let status_para = Paragraph::new(status)
-                    .block(block_2)
-                    .wrap(Wrap { trim: true });
-                f.render_widget(status_para, chunks[2]);
-            }
+            // status bar: show filter, pending status, or filter mode indicator
+            let status_text = if !self.pending.is_empty() {
+                format!("status: {}", self.pending)
+            } else if self.filter_mode {
+                format!("filter: {}_", self.filter)
+            } else if !self.filter.is_empty() {
+                format!("filter: {} (press / to edit, Backspace to clear)", self.filter)
+            } else {
+                String::new()
+            };
 
-            // pending operation
-            if !self.pending.is_empty() {
-                let status = format!("status: {}", self.pending);
-                let block_2 = Block::default().borders(Borders::NONE);
-                let status_para = Paragraph::new(status)
-                    .block(block_2)
+            if !status_text.is_empty() {
+                let status_para = Paragraph::new(status_text)
+                    .block(Block::default().borders(Borders::NONE))
                     .wrap(Wrap { trim: true });
                 f.render_widget(status_para, chunks[2]);
             }
