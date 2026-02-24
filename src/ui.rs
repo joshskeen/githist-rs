@@ -53,13 +53,13 @@ pub mod gui {
                 .iter()
                 .map(|x| x.branch_name.len())
                 .max()
-                .unwrap();
+                .unwrap_or(0);
 
             let items: Vec<ListItem> = self
                 .items
                 .filtered
                 .clone()
-                .unwrap_or(Box::default())
+                .unwrap_or_default()
                 .into_iter()
                 .map(|branch_info| {
                     let branch_and_padding =
