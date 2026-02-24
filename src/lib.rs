@@ -34,12 +34,17 @@ impl StatefulList {
         self.state.select(None);
     }
 
-    /// # Panics
-    ///
     pub fn next(&mut self) {
+        let len = self
+            .filtered
+            .as_ref()
+            .map_or(0, |f| f.len());
+        if len == 0 {
+            return;
+        }
         let i = match self.state.selected() {
             Some(i) => {
-                if i >= self.filtered.clone().unwrap().len() - 1 {
+                if i >= len - 1 {
                     0
                 } else {
                     i + 1
@@ -51,10 +56,17 @@ impl StatefulList {
     }
 
     pub fn previous(&mut self) {
+        let len = self
+            .filtered
+            .as_ref()
+            .map_or(0, |f| f.len());
+        if len == 0 {
+            return;
+        }
         let i = match self.state.selected() {
             Some(i) => {
                 if i == 0 {
-                    self.items.len() - 1
+                    len - 1
                 } else {
                     i - 1
                 }
@@ -78,12 +90,8 @@ impl App {
         }
     }
     pub fn select_first_item_if_none(&mut self) {
-        match self.items.state.selected() {
-            None => {
-                // no selection. select the first.
-                self.items.state.select(Some(0));
-            }
-            Some(_) => {}
+        if self.items.state.selected().is_none() {
+            self.items.state.select(Some(0));
         }
     }
 
@@ -136,7 +144,7 @@ impl App {
                 if self.filter.is_empty() {
                     true
                 } else {
-                    x.branch_name.to_lowercase().contains(&self.filter)
+                    x.branch_name.to_lowercase().contains(&self.filter.to_lowercase())
                 }
             })
             .collect();
