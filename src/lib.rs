@@ -16,6 +16,7 @@ pub struct StatefulList {
 pub struct App {
     pub items: StatefulList,
     pub filter: String,
+    pub filter_mode: bool,
     pub pending: String,
     pub delete_confirmation: Option<String>,
 }
@@ -75,6 +76,40 @@ impl StatefulList {
         };
         self.state.select(Some(i));
     }
+
+    pub fn page_down(&mut self, page_size: usize) {
+        let len = self.filtered.as_ref().map_or(0, |f| f.len());
+        if len == 0 {
+            return;
+        }
+        let i = self.state.selected().unwrap_or(0);
+        let new_i = (i + page_size).min(len - 1);
+        self.state.select(Some(new_i));
+    }
+
+    pub fn page_up(&mut self, page_size: usize) {
+        let len = self.filtered.as_ref().map_or(0, |f| f.len());
+        if len == 0 {
+            return;
+        }
+        let i = self.state.selected().unwrap_or(0);
+        let new_i = i.saturating_sub(page_size);
+        self.state.select(Some(new_i));
+    }
+
+    pub fn go_to_first(&mut self) {
+        let len = self.filtered.as_ref().map_or(0, |f| f.len());
+        if len > 0 {
+            self.state.select(Some(0));
+        }
+    }
+
+    pub fn go_to_last(&mut self) {
+        let len = self.filtered.as_ref().map_or(0, |f| f.len());
+        if len > 0 {
+            self.state.select(Some(len - 1));
+        }
+    }
 }
 
 pub struct NoSelectionError;
@@ -85,6 +120,7 @@ impl App {
         App {
             items: StatefulList::with_items(branches),
             filter: String::new(),
+            filter_mode: false,
             pending: String::new(),
             delete_confirmation: None,
         }
@@ -98,17 +134,26 @@ impl App {
     /// # Errors
     ///
     /// Will return `NoSelectionError` if a branch was not selected.
-    /// # Panics
+    pub fn get_selected_branch_info(&self) -> Result<BranchInfo, NoSelectionError> {
+        let index = self.items.state.selected().ok_or(NoSelectionError)?;
+        let filtered = self.items.filtered.as_ref().ok_or(NoSelectionError)?;
+        filtered.get(index).cloned().ok_or(NoSelectionError)
+    }
+
+    /// # Errors
     ///
-    pub fn get_selected_branch_name(&mut self) -> Result<String, NoSelectionError> {
-        let option = self.items.state.selected();
-        match option {
-            None => Err(NoSelectionError),
-            Some(index) => {
-                let x = self.items.filtered.clone().unwrap().to_vec();
-                Ok(x[index].branch_name.to_string())
-            }
-        }
+    /// Will return `NoSelectionError` if a branch was not selected.
+    pub fn get_selected_branch_name(&self) -> Result<String, NoSelectionError> {
+        self.get_selected_branch_info()
+            .map(|info| info.branch_name)
+    }
+
+    pub fn filtered_len(&self) -> usize {
+        self.items.filtered.as_ref().map_or(0, |f| f.len())
+    }
+
+    pub fn total_len(&self) -> usize {
+        self.items.items.len()
     }
 
     pub fn update_with_status(
