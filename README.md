@@ -25,4 +25,8 @@ If the working tree is dirty when switching, githist asks whether to stash the c
 
 ### demo
 
-https://user-images.githubusercontent.com/34185/222879924-539ef9fe-2fd2-4f13-ae54-3efd97c85b84.mov
+
+
+https://github.com/user-attachments/assets/ed8b0be0-563b-47bd-ada5-26b3979f4701
+
+
