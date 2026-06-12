@@ -7,11 +7,32 @@ pub mod branching {
 
     #[derive(Debug, Eq, PartialEq, Clone)]
     pub struct BranchInfo {
+        /// Local name, or remote name like "origin/feature" when `is_remote`.
         pub branch_name: String,
         pub last_commit_time: i64,
         pub time_ago: String,
+        /// Tip commit summary line.
+        pub summary: String,
         pub is_head: bool,
         pub remote_tracking: Option<String>,
+        /// True for a remote branch with no local counterpart.
+        pub is_remote: bool,
+        /// True when a githist stash created from this branch is pending.
+        pub has_stash: bool,
+        /// Reflog-derived checkout recency; higher = more recently checked out.
+        pub checkout_rank: Option<i64>,
+    }
+
+    fn commit_fields(
+        commit: &git2::Commit,
+        formatter: &Formatter,
+        now: DateTime<Utc>,
+    ) -> (i64, String, String) {
+        let last_commit_time = commit.time().seconds();
+        let time_ago = DateTime::from_timestamp(last_commit_time, 0)
+            .map_or_else(|| "unknown".to_string(), |dt| formatter.convert_chrono(dt, now));
+        let summary = commit.summary().ok().flatten().unwrap_or("").to_string();
+        (last_commit_time, time_ago, summary)
     }
 
     /// A TUI for quickly switching between recent Git branches
@@ -111,14 +132,12 @@ pub mod branching {
 
             for branch in branches {
                 let (branch, _) = branch?;
-                let branch_name = branch.name()?;
-                let branch_name = branch_name.expect("no branch name!?").to_string();
+                let Some(branch_name) = branch.name()?.map(String::from) else {
+                    continue; // skip branches with non-UTF8 names
+                };
                 let last_commit = branch.get().peel_to_commit()?;
-                let last_commit_time = last_commit.time().seconds();
-                let datetime: DateTime<Utc> =
-                    DateTime::from_timestamp(last_commit_time, 0)
-                        .expect("invalid commit timestamp");
-                let time_ago = formatter.convert_chrono(datetime, now);
+                let (last_commit_time, time_ago, summary) =
+                    commit_fields(&last_commit, &formatter, now);
                 let is_head = head_name.as_deref() == Some(branch_name.as_str());
                 let remote_tracking = self.remote_tracking_info(&branch_name);
 
@@ -126,8 +145,12 @@ pub mod branching {
                     branch_name,
                     last_commit_time,
                     time_ago,
+                    summary,
                     is_head,
                     remote_tracking,
+                    is_remote: false,
+                    has_stash: false,
+                    checkout_rank: None,
                 });
             }
             result.sort_by_key(|d| d.last_commit_time);
