@@ -4,6 +4,7 @@ use ratatui::widgets::ListState;
 use ratatui::Terminal;
 use std::io::Stdout;
 
+pub mod fuzzy;
 pub mod git;
 pub mod ui;
 
