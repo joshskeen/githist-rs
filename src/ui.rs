@@ -44,7 +44,7 @@ pub mod gui {
                     .as_ref(),
                 )
                 .direction(Direction::Vertical)
-                .split(f.size());
+                .split(f.area());
 
             // get the longest of all the branch names including ones not currently displayed necessarily.
             let largest_string_len = self

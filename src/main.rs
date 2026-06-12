@@ -11,7 +11,7 @@ use std::panic;
 fn main() -> Result<(), Box<dyn Error>> {
     let config = Config::parse();
 
-    let repo = match Repo::open(&config) {
+    let mut repo = match Repo::open(&config) {
         Ok(repo) => repo,
         Err(error) => {
             eprintln!("{error:?}");
@@ -33,7 +33,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             let mut app = App::new(result);
             app.select_first_item_if_none();
-            let res = app.run_app(&config, &repo, &mut terminal);
+            let res = app.run_app(&config, &mut repo, &mut terminal);
             if let Err(err) = res {
                 eprintln!("{err:?}");
             }

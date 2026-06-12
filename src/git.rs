@@ -1,7 +1,7 @@
 pub mod branching {
     use chrono::{DateTime, Utc};
     use clap::Parser;
-    use git2::{BranchType, Repository};
+    use git2::{BranchType, ErrorCode, Repository, StashFlags, Status};
     use std::time::Duration;
     use timeago::Formatter;
 
@@ -38,6 +38,21 @@ pub mod branching {
         inner: Repository,
     }
 
+    const STASHABLE_STATUS: Status = Status::INDEX_NEW
+        .union(Status::INDEX_MODIFIED)
+        .union(Status::INDEX_DELETED)
+        .union(Status::INDEX_RENAMED)
+        .union(Status::INDEX_TYPECHANGE)
+        .union(Status::WT_MODIFIED)
+        .union(Status::WT_DELETED)
+        .union(Status::WT_RENAMED)
+        .union(Status::WT_TYPECHANGE)
+        .union(Status::WT_NEW);
+
+    fn is_stashable_status(status: Status) -> bool {
+        status.intersects(STASHABLE_STATUS) && !status.contains(Status::IGNORED)
+    }
+
     impl Repo {
         /// # Errors
         ///
@@ -51,7 +66,7 @@ pub mod branching {
         fn head_branch_name(&self) -> Option<String> {
             let head = self.inner.head().ok()?;
             if head.is_branch() {
-                head.shorthand().map(String::from)
+                head.shorthand().ok().map(String::from)
             } else {
                 None
             }
@@ -120,14 +135,84 @@ pub mod branching {
             Ok(result)
         }
 
+        /// Returns true if there are local changes that can be stashed.
+        ///
+        /// # Errors
+        ///
+        /// Will return `git2::Error` if status could not be read.
+        pub fn is_dirty(&self) -> Result<bool, git2::Error> {
+            let mut opts = git2::StatusOptions::new();
+            opts.exclude_submodules(true);
+            let statuses = self.inner.statuses(Some(&mut opts))?;
+            Ok(statuses
+                .iter()
+                .any(|entry| is_stashable_status(entry.status())))
+        }
+
+        /// Stash tracked and untracked local changes.
+        ///
+        /// # Errors
+        ///
+        /// Will return `git2::Error` if stashing failed.
+        pub fn stash_changes(&mut self, target_branch: &str) -> Result<(), git2::Error> {
+            let current = self
+                .head_branch_name()
+                .unwrap_or_else(|| "HEAD".to_string());
+            let message = format!(
+                "githist: stash before switching from {current} to {target_branch}"
+            );
+            let signature = self.inner.signature()?;
+            match self.inner.stash_save(
+                &signature,
+                &message,
+                Some(StashFlags::INCLUDE_UNTRACKED),
+            ) {
+                Ok(_) => Ok(()),
+                Err(error) if error.code() == ErrorCode::NotFound => Ok(()),
+                Err(error) => Err(error),
+            }
+        }
+
+        fn worktree_holding_branch(
+            &self,
+            branch_name: &str,
+        ) -> Result<Option<String>, git2::Error> {
+            let refname = format!("refs/heads/{branch_name}");
+            let current_workdir = self.inner.workdir().map(std::path::PathBuf::from);
+            let worktrees = self.inner.worktrees()?;
+
+            for i in 0..worktrees.len() {
+                let Some(wt_name) = worktrees.get(i)? else {
+                    continue;
+                };
+                let wt = self.inner.find_worktree(wt_name)?;
+                let wt_path = wt.path();
+                if current_workdir.as_deref() == Some(wt_path) {
+                    continue;
+                }
+                let wt_repo = Repository::open_from_worktree(&wt)?;
+                let head = wt_repo.head()?;
+                if head.name()? == refname {
+                    return Ok(Some(wt_path.display().to_string()));
+                }
+            }
+
+            Ok(None)
+        }
+
         /// # Errors
         ///
         /// Will return `git2::Error` if branch change failed.
         pub fn change_branch(&self, branch_name: &str) -> Result<(), git2::Error> {
+            if let Some(path) = self.worktree_holding_branch(branch_name)? {
+                return Err(git2::Error::from_str(&format!(
+                    "branch '{branch_name}' is already checked out in {path}"
+                )));
+            }
+
             let refname = format!("refs/heads/{branch_name}");
-            let obj = self.inner.revparse_single(&refname)?;
-            self.inner.checkout_tree(&obj, None)?;
             self.inner.set_head(&refname)?;
+            self.inner.checkout_head(None)?;
             Ok(())
         }
 

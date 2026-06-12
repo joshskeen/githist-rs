@@ -19,7 +19,7 @@ pub mod app {
         pub fn run_app(
             &mut self,
             config: &Config,
-            repo: &Repo,
+            repo: &mut Repo,
             terminal: &mut Terminal<CrosstermBackend<Stdout>>,
         ) -> io::Result<()> {
             let mut last_tick = Instant::now();
@@ -124,12 +124,43 @@ pub mod app {
                                                 terminal, status,
                                             );
                                         } else {
+                                            let branch_name = info.branch_name.clone();
                                             let status = format!(
-                                                "switching to branch: {}",
-                                                info.branch_name
+                                                "switching to branch: {branch_name}"
                                             );
                                             self.update_with_status(terminal, status);
-                                            match repo.change_branch(&info.branch_name) {
+
+                                            match repo.is_dirty() {
+                                                Ok(true) => {
+                                                    let status = format!(
+                                                        "stashing changes, then switching to branch: {branch_name}"
+                                                    );
+                                                    self.update_with_status(terminal, status);
+                                                    if let Err(error) =
+                                                        repo.stash_changes(&branch_name)
+                                                    {
+                                                        let status = format!(
+                                                            "couldn't stash changes: {error}"
+                                                        );
+                                                        self.update_with_status_preserve_filter(
+                                                            terminal, status,
+                                                        );
+                                                        continue;
+                                                    }
+                                                }
+                                                Ok(false) => {}
+                                                Err(error) => {
+                                                    let status = format!(
+                                                        "couldn't check working tree status: {error}"
+                                                    );
+                                                    self.update_with_status_preserve_filter(
+                                                        terminal, status,
+                                                    );
+                                                    continue;
+                                                }
+                                            }
+
+                                            match repo.change_branch(&branch_name) {
                                                 Ok(_) => return Ok(()),
                                                 Err(error) => {
                                                     let status = format!(
