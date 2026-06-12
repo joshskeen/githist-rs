@@ -58,13 +58,12 @@ pub mod gui {
             let items: Vec<ListItem> = self
                 .items
                 .filtered
-                .clone()
-                .unwrap_or_default()
-                .into_iter()
-                .map(|branch_info| {
+                .iter()
+                .map(|entry| {
+                    let branch_info = &self.items.items[entry.index];
                     let head_marker = if branch_info.is_head { "* " } else { "  " };
                     let branch_and_padding =
-                        branch_info.branch_name.pad_to_width(largest_string_len);
+                        branch_info.branch_name.as_str().pad_to_width(largest_string_len);
                     let remote_info = branch_info
                         .remote_tracking
                         .as_deref()
@@ -131,12 +130,15 @@ pub mod gui {
             // status bar: show filter, pending status, or filter mode indicator
             let status_text = if !self.pending.is_empty() {
                 format!("status: {}", self.pending)
-            } else if self.filter_mode {
-                format!("filter: {}_", self.filter)
-            } else if !self.filter.is_empty() {
-                format!("filter: {} (press / to edit, Backspace to clear)", self.filter)
             } else {
-                String::new()
+                match &self.mode {
+                    crate::Mode::Filter => format!("filter: {}_", self.filter),
+                    crate::Mode::Normal if !self.filter.is_empty() => format!(
+                        "filter: {} (press / to edit, Backspace to clear)",
+                        self.filter
+                    ),
+                    _ => String::new(),
+                }
             };
 
             if !status_text.is_empty() {

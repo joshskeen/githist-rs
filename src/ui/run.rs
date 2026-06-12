@@ -1,6 +1,6 @@
 pub mod app {
     use crate::git::branching::{Config, Repo};
-    use crate::App;
+    use crate::{App, Mode};
     use crossterm::event;
     use crossterm::event::{Event, KeyCode, KeyModifiers};
     use ratatui::backend::CrosstermBackend;
@@ -33,10 +33,10 @@ pub mod app {
                 if event::poll(timeout)? {
                     if let Event::Key(key) = event::read()? {
                         // Delete confirmation mode
-                        if let Some(branch_name) = self.delete_confirmation.clone() {
+                        if let Mode::ConfirmDelete { branch_name, .. } = self.mode.clone() {
                             match key.code {
                                 KeyCode::Char('Y') | KeyCode::Char('y') => {
-                                    self.delete_confirmation = None;
+                                    self.mode = Mode::Normal;
                                     let selected_index = self.items.state.selected();
                                     match repo.delete_branch(&branch_name) {
                                         Ok(_) => match repo.get_branch_names() {
@@ -51,26 +51,20 @@ pub mod app {
                                                 }
                                                 let status =
                                                     format!("deleted branch: {}", branch_name);
-                                                self.update_with_status_preserve_filter(
-                                                    terminal, status,
-                                                );
+                                                self.show_status(terminal, status);
                                             }
                                             Err(error) => {
                                                 let status = format!(
                                                     "deleted branch but failed to refresh list: {error}"
                                                 );
-                                                self.update_with_status_preserve_filter(
-                                                    terminal, status,
-                                                );
+                                                self.show_status(terminal, status);
                                             }
                                         },
                                         Err(error) => {
                                             let status = format!(
                                                 "couldn't delete branch {branch_name}: {error}"
                                             );
-                                            self.update_with_status_preserve_filter(
-                                                terminal, status,
-                                            );
+                                            self.show_status(terminal, status);
                                         }
                                     }
                                 }
@@ -78,8 +72,8 @@ pub mod app {
                                 | KeyCode::Char('n')
                                 | KeyCode::Esc
                                 | KeyCode::Backspace => {
-                                    self.delete_confirmation = None;
-                                    self.clear_pending_status(terminal);
+                                    self.mode = Mode::Normal;
+                                    self.show_status(terminal, String::new());
                                 }
                                 _ => {}
                             }
@@ -87,14 +81,14 @@ pub mod app {
                         }
 
                         // Filter mode: typing goes to the filter
-                        if self.filter_mode {
+                        if self.mode == Mode::Filter {
                             match key.code {
                                 KeyCode::Esc | KeyCode::Enter => {
-                                    self.filter_mode = false;
+                                    self.mode = Mode::Normal;
                                 }
                                 KeyCode::Backspace => {
                                     if self.filter.pop().is_none() {
-                                        self.filter_mode = false;
+                                        self.mode = Mode::Normal;
                                     }
                                     self.update_filtered();
                                 }
@@ -120,31 +114,27 @@ pub mod app {
                                                 "already on branch '{}'",
                                                 info.branch_name
                                             );
-                                            self.update_with_status_preserve_filter(
-                                                terminal, status,
-                                            );
+                                            self.show_status(terminal, status);
                                         } else {
                                             let branch_name = info.branch_name.clone();
                                             let status = format!(
                                                 "switching to branch: {branch_name}"
                                             );
-                                            self.update_with_status(terminal, status);
+                                            self.show_status(terminal, status);
 
                                             match repo.is_dirty() {
                                                 Ok(true) => {
                                                     let status = format!(
                                                         "stashing changes, then switching to branch: {branch_name}"
                                                     );
-                                                    self.update_with_status(terminal, status);
+                                                    self.show_status(terminal, status);
                                                     if let Err(error) =
                                                         repo.stash_changes(&branch_name)
                                                     {
                                                         let status = format!(
                                                             "couldn't stash changes: {error}"
                                                         );
-                                                        self.update_with_status_preserve_filter(
-                                                            terminal, status,
-                                                        );
+                                                        self.show_status(terminal, status);
                                                         continue;
                                                     }
                                                 }
@@ -153,9 +143,7 @@ pub mod app {
                                                     let status = format!(
                                                         "couldn't check working tree status: {error}"
                                                     );
-                                                    self.update_with_status_preserve_filter(
-                                                        terminal, status,
-                                                    );
+                                                    self.show_status(terminal, status);
                                                     continue;
                                                 }
                                             }
@@ -166,16 +154,14 @@ pub mod app {
                                                     let status = format!(
                                                         "couldn't change branch: {error}"
                                                     );
-                                                    self.update_with_status_preserve_filter(
-                                                        terminal, status,
-                                                    );
+                                                    self.show_status(terminal, status);
                                                 }
                                             }
                                         }
                                     }
                                     Err(_) => {
                                         let status = "no selection, nothing to do!".to_string();
-                                        self.update_with_status_preserve_filter(terminal, status);
+                                        self.show_status(terminal, status);
                                     }
                                 }
                             }
@@ -190,29 +176,27 @@ pub mod app {
                                                 "can't delete '{}': it is the current branch",
                                                 info.branch_name
                                             );
-                                            self.update_with_status_preserve_filter(
-                                                terminal, status,
-                                            );
+                                            self.show_status(terminal, status);
                                         } else {
-                                            self.delete_confirmation =
-                                                Some(info.branch_name.clone());
+                                            self.mode = Mode::ConfirmDelete {
+                                                branch_name: info.branch_name.clone(),
+                                                merged: true,
+                                            };
                                             let status = format!(
                                                 "confirm deleting branch {}? press Y to delete or N to cancel",
                                                 info.branch_name
                                             );
-                                            self.update_with_status_preserve_filter(
-                                                terminal, status,
-                                            );
+                                            self.show_status(terminal, status);
                                         }
                                     }
                                     Err(_) => {
                                         let status = "no selection, nothing to delete!".to_string();
-                                        self.update_with_status_preserve_filter(terminal, status);
+                                        self.show_status(terminal, status);
                                     }
                                 }
                             }
                             KeyCode::Char('/') => {
-                                self.filter_mode = true;
+                                self.mode = Mode::Filter;
                             }
                             KeyCode::Down | KeyCode::Char('j') => self.items.next(),
                             KeyCode::Up | KeyCode::Char('k') => self.items.previous(),
