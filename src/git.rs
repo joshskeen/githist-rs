@@ -2,16 +2,40 @@ pub mod branching {
     use chrono::{DateTime, Utc};
     use clap::Parser;
     use git2::{BranchType, ErrorCode, Repository, StashFlags, Status};
+    use std::collections::{HashMap, HashSet};
     use std::time::Duration;
     use timeago::Formatter;
 
     #[derive(Debug, Eq, PartialEq, Clone)]
     pub struct BranchInfo {
+        /// Local name, or remote name like "origin/feature" when `is_remote`.
         pub branch_name: String,
         pub last_commit_time: i64,
         pub time_ago: String,
+        /// Tip commit summary line.
+        pub summary: String,
         pub is_head: bool,
         pub remote_tracking: Option<String>,
+        /// True for a remote branch with no local counterpart.
+        pub is_remote: bool,
+        /// True when a githist stash created from this branch is pending.
+        pub has_stash: bool,
+        /// Reflog-derived checkout recency; higher = more recently checked out.
+        pub checkout_rank: Option<i64>,
+    }
+
+    fn commit_fields(
+        commit: &git2::Commit,
+        formatter: &Formatter,
+        now: DateTime<Utc>,
+    ) -> (i64, String, String) {
+        let last_commit_time = commit.time().seconds();
+        let time_ago = DateTime::from_timestamp(last_commit_time, 0).map_or_else(
+            || "unknown".to_string(),
+            |dt| formatter.convert_chrono(dt, now),
+        );
+        let summary = commit.summary().ok().flatten().unwrap_or("").to_string();
+        (last_commit_time, time_ago, summary)
     }
 
     /// A TUI for quickly switching between recent Git branches
@@ -36,6 +60,16 @@ pub mod branching {
     /// Wrapper around a git2::Repository to avoid re-opening on every operation.
     pub struct Repo {
         inner: Repository,
+    }
+
+    const STASH_MARKER: &str = "githist: stash before switching from ";
+
+    /// Local branch name for a remote branch like "origin/feature".
+    #[must_use]
+    pub fn local_branch_name(remote_name: &str) -> &str {
+        remote_name
+            .split_once('/')
+            .map_or(remote_name, |(_, suffix)| suffix)
     }
 
     const STASHABLE_STATUS: Status = Status::INDEX_NEW
@@ -72,11 +106,57 @@ pub mod branching {
             }
         }
 
+        /// Map branch name -> checkout recency rank parsed from the HEAD reflog.
+        /// Higher rank = more recently checked out. Rank is reflog position
+        /// (not timestamp) so same-second checkouts stay ordered.
+        fn checkout_recency(&self) -> HashMap<String, i64> {
+            let mut map = HashMap::new();
+            let Ok(reflog) = self.inner.reflog("HEAD") else {
+                return map;
+            };
+            let total = i64::try_from(reflog.len()).unwrap_or(i64::MAX);
+            for (idx, entry) in reflog.iter().enumerate() {
+                let Ok(Some(msg)) = entry.message() else {
+                    continue;
+                };
+                let Some(rest) = msg.strip_prefix("checkout: moving from ") else {
+                    continue;
+                };
+                let Some((_, to)) = rest.split_once(" to ") else {
+                    continue;
+                };
+                let rank = total - i64::try_from(idx).unwrap_or(0);
+                map.entry(to.to_string()).or_insert(rank);
+            }
+            map
+        }
+
+        /// The branch checked out before the current one, like `git checkout -`.
+        #[must_use]
+        pub fn previous_branch(&self) -> Option<String> {
+            let current = self.head_branch_name();
+            let reflog = self.inner.reflog("HEAD").ok()?;
+            for entry in reflog.iter() {
+                let Ok(Some(msg)) = entry.message() else {
+                    continue;
+                };
+                let Some(rest) = msg.strip_prefix("checkout: moving from ") else {
+                    continue;
+                };
+                let Some((from, _)) = rest.split_once(" to ") else {
+                    continue;
+                };
+                if Some(from) != current.as_deref()
+                    && self.inner.find_branch(from, BranchType::Local).is_ok()
+                {
+                    return Some(from.to_string());
+                }
+            }
+            None
+        }
+
         /// Compute ahead/behind info relative to the remote tracking branch.
-        fn remote_tracking_info(
-            &self,
-            branch_name: &str,
-        ) -> Option<String> {
+        fn remote_tracking_info(&self, branch_name: &str) -> Option<String> {
             let branch = self
                 .inner
                 .find_branch(branch_name, BranchType::Local)
@@ -84,7 +164,10 @@ pub mod branching {
             let upstream = branch.upstream().ok()?;
             let local_oid = branch.get().target()?;
             let upstream_oid = upstream.get().target()?;
-            let (ahead, behind) = self.inner.graph_ahead_behind(local_oid, upstream_oid).ok()?;
+            let (ahead, behind) = self
+                .inner
+                .graph_ahead_behind(local_oid, upstream_oid)
+                .ok()?;
             if ahead == 0 && behind == 0 {
                 Some("up to date".to_string())
             } else {
@@ -102,36 +185,75 @@ pub mod branching {
         /// # Errors
         ///
         /// Will return `git2::Error` if not a valid repo.
-        pub fn get_branch_names(&self) -> Result<Vec<BranchInfo>, git2::Error> {
+        pub fn get_branch_names(&mut self) -> Result<Vec<BranchInfo>, git2::Error> {
             let mut result = Vec::new();
             let head_name = self.head_branch_name();
+            let recency = self.checkout_recency();
+            let stashed = self.stashed_branches();
             let branches = self.inner.branches(Some(BranchType::Local))?;
             let formatter = Formatter::new();
             let now = Utc::now();
+            let mut local_names = HashSet::new();
 
             for branch in branches {
                 let (branch, _) = branch?;
-                let branch_name = branch.name()?;
-                let branch_name = branch_name.expect("no branch name!?").to_string();
+                let Some(branch_name) = branch.name()?.map(String::from) else {
+                    continue; // skip branches with non-UTF8 names
+                };
+                local_names.insert(branch_name.clone());
                 let last_commit = branch.get().peel_to_commit()?;
-                let last_commit_time = last_commit.time().seconds();
-                let datetime: DateTime<Utc> =
-                    DateTime::from_timestamp(last_commit_time, 0)
-                        .expect("invalid commit timestamp");
-                let time_ago = formatter.convert_chrono(datetime, now);
+                let (last_commit_time, time_ago, summary) =
+                    commit_fields(&last_commit, &formatter, now);
                 let is_head = head_name.as_deref() == Some(branch_name.as_str());
                 let remote_tracking = self.remote_tracking_info(&branch_name);
+                let checkout_rank = recency.get(&branch_name).copied();
+                let has_stash = stashed.contains(&branch_name);
 
                 result.push(BranchInfo {
                     branch_name,
                     last_commit_time,
                     time_ago,
+                    summary,
                     is_head,
                     remote_tracking,
+                    is_remote: false,
+                    has_stash,
+                    checkout_rank,
                 });
             }
-            result.sort_by_key(|d| d.last_commit_time);
-            result.reverse();
+
+            for branch in self.inner.branches(Some(BranchType::Remote))? {
+                let (branch, _) = branch?;
+                let Some(branch_name) = branch.name()?.map(String::from) else {
+                    continue;
+                };
+                if branch_name.ends_with("/HEAD") {
+                    continue;
+                }
+                if local_names.contains(local_branch_name(&branch_name)) {
+                    continue;
+                }
+                let last_commit = branch.get().peel_to_commit()?;
+                let (last_commit_time, time_ago, summary) =
+                    commit_fields(&last_commit, &formatter, now);
+                result.push(BranchInfo {
+                    branch_name,
+                    last_commit_time,
+                    time_ago,
+                    summary,
+                    is_head: false,
+                    remote_tracking: None,
+                    is_remote: true,
+                    has_stash: false,
+                    checkout_rank: None,
+                });
+            }
+
+            result.sort_by(|a, b| {
+                let ka = (a.checkout_rank.unwrap_or(i64::MIN), a.last_commit_time);
+                let kb = (b.checkout_rank.unwrap_or(i64::MIN), b.last_commit_time);
+                kb.cmp(&ka)
+            });
             Ok(result)
         }
 
@@ -143,6 +265,7 @@ pub mod branching {
         pub fn is_dirty(&self) -> Result<bool, git2::Error> {
             let mut opts = git2::StatusOptions::new();
             opts.exclude_submodules(true);
+            opts.include_untracked(true);
             let statuses = self.inner.statuses(Some(&mut opts))?;
             Ok(statuses
                 .iter()
@@ -158,19 +281,52 @@ pub mod branching {
             let current = self
                 .head_branch_name()
                 .unwrap_or_else(|| "HEAD".to_string());
-            let message = format!(
-                "githist: stash before switching from {current} to {target_branch}"
-            );
+            let message = format!("{STASH_MARKER}{current} to {target_branch}");
             let signature = self.inner.signature()?;
-            match self.inner.stash_save(
-                &signature,
-                &message,
-                Some(StashFlags::INCLUDE_UNTRACKED),
-            ) {
+            match self
+                .inner
+                .stash_save(&signature, &message, Some(StashFlags::INCLUDE_UNTRACKED))
+            {
                 Ok(_) => Ok(()),
                 Err(error) if error.code() == ErrorCode::NotFound => Ok(()),
                 Err(error) => Err(error),
             }
+        }
+
+        /// Branch names that have a pending githist stash (parsed from stash
+        /// messages; git prefixes them with "On <branch>: ").
+        fn stashed_branches(&mut self) -> HashSet<String> {
+            let mut set = HashSet::new();
+            let _ = self.inner.stash_foreach(|_, message, _| {
+                if let Some(rest) = message.split(STASH_MARKER).nth(1) {
+                    if let Some((from, _)) = rest.split_once(" to ") {
+                        set.insert(from.to_string());
+                    }
+                }
+                true
+            });
+            set
+        }
+
+        /// Newest githist stash created when leaving `branch`, if any.
+        pub fn find_githist_stash(&mut self, branch: &str) -> Option<usize> {
+            let needle = format!("{STASH_MARKER}{branch} to ");
+            let mut found = None;
+            let _ = self.inner.stash_foreach(|index, message, _| {
+                if found.is_none() && message.contains(&needle) {
+                    found = Some(index);
+                    return false;
+                }
+                true
+            });
+            found
+        }
+
+        /// # Errors
+        ///
+        /// Will return `git2::Error` if the stash could not be applied cleanly.
+        pub fn pop_stash(&mut self, index: usize) -> Result<(), git2::Error> {
+            self.inner.stash_pop(index, None)
         }
 
         fn worktree_holding_branch(
@@ -211,9 +367,61 @@ pub mod branching {
             }
 
             let refname = format!("refs/heads/{branch_name}");
+            let target = self.inner.revparse_single(&refname)?;
+            // Safe checkout: carries compatible local changes, errors on conflict
+            // BEFORE HEAD moves, so a failure leaves the repo untouched.
+            self.inner.checkout_tree(&target, None)?;
             self.inner.set_head(&refname)?;
-            self.inner.checkout_head(None)?;
             Ok(())
+        }
+
+        /// True when `branch_name`'s tip is reachable from HEAD.
+        ///
+        /// # Errors
+        ///
+        /// Will return `git2::Error` if the branch or HEAD can't be resolved.
+        pub fn is_merged_into_head(&self, branch_name: &str) -> Result<bool, git2::Error> {
+            let branch = self.inner.find_branch(branch_name, BranchType::Local)?;
+            let branch_oid = branch
+                .get()
+                .target()
+                .ok_or_else(|| git2::Error::from_str("branch has no target"))?;
+            let head_oid = self
+                .inner
+                .head()?
+                .target()
+                .ok_or_else(|| git2::Error::from_str("HEAD has no target"))?;
+            if branch_oid == head_oid {
+                return Ok(true);
+            }
+            self.inner.graph_descendant_of(head_oid, branch_oid)
+        }
+
+        /// Create a branch at HEAD and switch to it.
+        ///
+        /// # Errors
+        ///
+        /// Will return `git2::Error` if creation or checkout failed.
+        pub fn create_branch(&self, name: &str) -> Result<(), git2::Error> {
+            let head = self.inner.head()?.peel_to_commit()?;
+            self.inner.branch(name, &head, false)?;
+            self.change_branch(name)
+        }
+
+        /// Create a local tracking branch for `remote_name` (e.g. "origin/feature")
+        /// and switch to it. Returns the local branch name.
+        ///
+        /// # Errors
+        ///
+        /// Will return `git2::Error` if creation, upstream setup, or checkout failed.
+        pub fn checkout_remote(&self, remote_name: &str) -> Result<String, git2::Error> {
+            let local_name = local_branch_name(remote_name).to_string();
+            let remote_branch = self.inner.find_branch(remote_name, BranchType::Remote)?;
+            let commit = remote_branch.get().peel_to_commit()?;
+            let mut local = self.inner.branch(&local_name, &commit, false)?;
+            local.set_upstream(Some(remote_name))?;
+            self.change_branch(&local_name)?;
+            Ok(local_name)
         }
 
         /// # Errors

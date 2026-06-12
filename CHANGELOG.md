@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-12
+
+### Added
+
+- Restore githist stashes automatically when switching back to a branch; `⚑ stashed` marker on branches with pending stashes
+- Prompt on dirty working tree: stash, bring changes along, or cancel (replaces unconditional auto-stash)
+- Sort branches by checkout recency from the HEAD reflog, falling back to commit time
+- `-` key to switch to the previously checked-out branch
+- Fuzzy filtering with match highlighting; arrows navigate and Enter switches while filtering
+- List remote-only branches (dimmed); selecting one creates a local tracking branch
+- Offer to create a branch when the filter matches nothing
+- Warn before deleting a branch that is not merged into HEAD
+- Show the tip commit summary for each branch
+- Print a summary message (switched/created/stash restored) on exit; exit code 1 on errors
+- Integration and unit test suite
+
+### Changed
+
+- Checkout the target tree before moving HEAD so a conflicting switch leaves the repository untouched
+- Use terminal default colors instead of forcing black-on-white rows
+- Fix bottom help/status bars disappearing in short terminals
+- Skip branches with non-UTF8 names instead of panicking
+
+### Fixed
+
+- Detect untracked-only changes when checking whether the tree is dirty (stash-on-switch previously missed them)
+
+### Removed
+
+- `pad` dependency
+
 ## [0.5.0] - 2026-06-12
 
 ### Added
@@ -52,7 +83,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Migrate from tui-rs to ratatui
 - Show branch switch status in the TUI before switching ([#2](https://github.com/joshskeen/githist-rs/pull/2))
 
-[Unreleased]: https://github.com/joshskeen/githist-rs/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/joshskeen/githist-rs/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/joshskeen/githist-rs/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/joshskeen/githist-rs/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/joshskeen/githist-rs/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/joshskeen/githist-rs/compare/v0.2.0...v0.3.0
