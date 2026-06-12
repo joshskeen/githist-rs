@@ -62,7 +62,7 @@ fn previous_branch_comes_from_reflog() {
     let repo = init_repo(dir.path());
     create_branch(&repo, "feature-a");
 
-    let mut githist_repo = open_githist_repo(dir.path());
+    let githist_repo = open_githist_repo(dir.path());
     githist_repo.change_branch("feature-a").unwrap();
     assert_eq!(githist_repo.previous_branch().as_deref(), Some("main"));
 
@@ -151,7 +151,7 @@ fn detects_whether_branch_is_merged_into_head() {
     let dir = tempfile::tempdir().unwrap();
     let repo = init_repo(dir.path());
     create_branch(&repo, "merged-branch"); // same commit as HEAD
-    let mut githist_repo = open_githist_repo(dir.path());
+    let githist_repo = open_githist_repo(dir.path());
     githist_repo.change_branch("merged-branch").unwrap();
     commit_file_at(&repo, "b.txt", "b", "unmerged work", 1_000_300);
     githist_repo.change_branch("main").unwrap();
