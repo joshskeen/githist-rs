@@ -105,3 +105,43 @@ fn change_branch_fails_without_moving_head_on_conflict() {
         "local edit"
     );
 }
+
+#[test]
+fn githist_stash_roundtrip() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = init_repo(dir.path());
+    create_branch(&repo, "feature-a");
+    let mut githist_repo = open_githist_repo(dir.path());
+
+    fs::write(dir.path().join("wip.txt"), "wip").unwrap();
+    assert!(githist_repo.is_dirty().unwrap());
+    githist_repo.stash_changes("feature-a").unwrap();
+    githist_repo.change_branch("feature-a").unwrap();
+    assert!(!dir.path().join("wip.txt").exists());
+
+    // the stash was created when leaving main, so it's found when returning
+    assert!(githist_repo.find_githist_stash("feature-a").is_none());
+    let index = githist_repo.find_githist_stash("main").unwrap();
+    githist_repo.change_branch("main").unwrap();
+    githist_repo.pop_stash(index).unwrap();
+    assert_eq!(fs::read_to_string(dir.path().join("wip.txt")).unwrap(), "wip");
+    assert!(githist_repo.find_githist_stash("main").is_none());
+}
+
+#[test]
+fn branches_with_pending_githist_stash_are_flagged() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = init_repo(dir.path());
+    create_branch(&repo, "feature-a");
+    let mut githist_repo = open_githist_repo(dir.path());
+
+    fs::write(dir.path().join("wip.txt"), "wip").unwrap();
+    githist_repo.stash_changes("feature-a").unwrap();
+    githist_repo.change_branch("feature-a").unwrap();
+
+    let branches = githist_repo.get_branch_names().unwrap();
+    let main = branches.iter().find(|b| b.branch_name == "main").unwrap();
+    let feature = branches.iter().find(|b| b.branch_name == "feature-a").unwrap();
+    assert!(main.has_stash);
+    assert!(!feature.has_stash);
+}

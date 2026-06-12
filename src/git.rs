@@ -2,7 +2,7 @@ pub mod branching {
     use chrono::{DateTime, Utc};
     use clap::Parser;
     use git2::{BranchType, ErrorCode, Repository, StashFlags, Status};
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::time::Duration;
     use timeago::Formatter;
 
@@ -59,6 +59,8 @@ pub mod branching {
     pub struct Repo {
         inner: Repository,
     }
+
+    const STASH_MARKER: &str = "githist: stash before switching from ";
 
     const STASHABLE_STATUS: Status = Status::INDEX_NEW
         .union(Status::INDEX_MODIFIED)
@@ -165,10 +167,11 @@ pub mod branching {
         /// # Errors
         ///
         /// Will return `git2::Error` if not a valid repo.
-        pub fn get_branch_names(&self) -> Result<Vec<BranchInfo>, git2::Error> {
+        pub fn get_branch_names(&mut self) -> Result<Vec<BranchInfo>, git2::Error> {
             let mut result = Vec::new();
             let head_name = self.head_branch_name();
             let recency = self.checkout_recency();
+            let stashed = self.stashed_branches();
             let branches = self.inner.branches(Some(BranchType::Local))?;
             let formatter = Formatter::new();
             let now = Utc::now();
@@ -184,6 +187,7 @@ pub mod branching {
                 let is_head = head_name.as_deref() == Some(branch_name.as_str());
                 let remote_tracking = self.remote_tracking_info(&branch_name);
                 let checkout_rank = recency.get(&branch_name).copied();
+                let has_stash = stashed.contains(&branch_name);
 
                 result.push(BranchInfo {
                     branch_name,
@@ -193,7 +197,7 @@ pub mod branching {
                     is_head,
                     remote_tracking,
                     is_remote: false,
-                    has_stash: false,
+                    has_stash,
                     checkout_rank,
                 });
             }
@@ -213,6 +217,7 @@ pub mod branching {
         pub fn is_dirty(&self) -> Result<bool, git2::Error> {
             let mut opts = git2::StatusOptions::new();
             opts.exclude_submodules(true);
+            opts.include_untracked(true);
             let statuses = self.inner.statuses(Some(&mut opts))?;
             Ok(statuses
                 .iter()
@@ -228,9 +233,7 @@ pub mod branching {
             let current = self
                 .head_branch_name()
                 .unwrap_or_else(|| "HEAD".to_string());
-            let message = format!(
-                "githist: stash before switching from {current} to {target_branch}"
-            );
+            let message = format!("{STASH_MARKER}{current} to {target_branch}");
             let signature = self.inner.signature()?;
             match self.inner.stash_save(
                 &signature,
@@ -241,6 +244,42 @@ pub mod branching {
                 Err(error) if error.code() == ErrorCode::NotFound => Ok(()),
                 Err(error) => Err(error),
             }
+        }
+
+        /// Branch names that have a pending githist stash (parsed from stash
+        /// messages; git prefixes them with "On <branch>: ").
+        fn stashed_branches(&mut self) -> HashSet<String> {
+            let mut set = HashSet::new();
+            let _ = self.inner.stash_foreach(|_, message, _| {
+                if let Some(rest) = message.split(STASH_MARKER).nth(1) {
+                    if let Some((from, _)) = rest.split_once(" to ") {
+                        set.insert(from.to_string());
+                    }
+                }
+                true
+            });
+            set
+        }
+
+        /// Newest githist stash created when leaving `branch`, if any.
+        pub fn find_githist_stash(&mut self, branch: &str) -> Option<usize> {
+            let needle = format!("{STASH_MARKER}{branch} to ");
+            let mut found = None;
+            let _ = self.inner.stash_foreach(|index, message, _| {
+                if found.is_none() && message.contains(&needle) {
+                    found = Some(index);
+                    return false;
+                }
+                true
+            });
+            found
+        }
+
+        /// # Errors
+        ///
+        /// Will return `git2::Error` if the stash could not be applied cleanly.
+        pub fn pop_stash(&mut self, index: usize) -> Result<(), git2::Error> {
+            self.inner.stash_pop(index, None)
         }
 
         fn worktree_holding_branch(
