@@ -1,6 +1,7 @@
 mod common;
 
 use common::*;
+use std::fs;
 
 #[test]
 fn lists_local_branches_with_head_marked() {
@@ -68,4 +69,39 @@ fn previous_branch_comes_from_reflog() {
     githist_repo.change_branch("main").unwrap();
     assert_eq!(githist_repo.previous_branch().as_deref(), Some("feature-a"));
     drop(repo);
+}
+
+#[test]
+fn change_branch_carries_compatible_dirty_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = init_repo(dir.path());
+    create_branch(&repo, "feature-a");
+
+    fs::write(dir.path().join("untracked.txt"), "wip").unwrap();
+    let githist_repo = open_githist_repo(dir.path());
+    githist_repo.change_branch("feature-a").unwrap();
+
+    assert!(dir.path().join("untracked.txt").exists());
+    assert_eq!(repo.head().unwrap().shorthand().ok(), Some("feature-a"));
+}
+
+#[test]
+fn change_branch_fails_without_moving_head_on_conflict() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = init_repo(dir.path());
+    create_branch(&repo, "other");
+    let githist_repo = open_githist_repo(dir.path());
+    githist_repo.change_branch("other").unwrap();
+    commit_file_at(&repo, "README.md", "other version", "diverge", 1_000_200);
+    githist_repo.change_branch("main").unwrap();
+
+    // local edit conflicts with the tree on `other`
+    fs::write(dir.path().join("README.md"), "local edit").unwrap();
+    let err = githist_repo.change_branch("other");
+    assert!(err.is_err());
+    assert_eq!(repo.head().unwrap().shorthand().ok(), Some("main"));
+    assert_eq!(
+        fs::read_to_string(dir.path().join("README.md")).unwrap(),
+        "local edit"
+    );
 }

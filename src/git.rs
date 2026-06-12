@@ -281,8 +281,11 @@ pub mod branching {
             }
 
             let refname = format!("refs/heads/{branch_name}");
+            let target = self.inner.revparse_single(&refname)?;
+            // Safe checkout: carries compatible local changes, errors on conflict
+            // BEFORE HEAD moves, so a failure leaves the repo untouched.
+            self.inner.checkout_tree(&target, None)?;
             self.inner.set_head(&refname)?;
-            self.inner.checkout_head(None)?;
             Ok(())
         }
 
