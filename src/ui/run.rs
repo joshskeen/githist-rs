@@ -84,14 +84,12 @@ pub mod app {
                                 self.pending = format!("deleted branch: {branch_name}");
                             }
                             Err(error) => {
-                                self.pending = format!(
-                                    "deleted branch but failed to refresh list: {error}"
-                                );
+                                self.pending =
+                                    format!("deleted branch but failed to refresh list: {error}");
                             }
                         },
                         Err(error) => {
-                            self.pending =
-                                format!("couldn't delete branch {branch_name}: {error}");
+                            self.pending = format!("couldn't delete branch {branch_name}: {error}");
                         }
                     }
                 }
@@ -140,9 +138,9 @@ pub mod app {
                 KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                     self.mode = Mode::Normal;
                     match repo.create_branch(name) {
-                        Ok(()) => Outcome::Exit(Some(format!(
-                            "created and switched to branch '{name}'"
-                        ))),
+                        Ok(()) => {
+                            Outcome::Exit(Some(format!("created and switched to branch '{name}'")))
+                        }
                         Err(error) => {
                             self.pending = format!("couldn't create branch '{name}': {error}");
                             Outcome::Stay
@@ -221,9 +219,8 @@ pub mod app {
                                     info.branch_name
                                 );
                             } else {
-                                let merged = repo
-                                    .is_merged_into_head(&info.branch_name)
-                                    .unwrap_or(false);
+                                let merged =
+                                    repo.is_merged_into_head(&info.branch_name).unwrap_or(false);
                                 self.pending.clear();
                                 self.mode = Mode::ConfirmDelete {
                                     branch_name: info.branch_name,

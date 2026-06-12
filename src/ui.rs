@@ -94,12 +94,13 @@ pub mod gui {
                     } else {
                         Style::default()
                     };
-                    let match_style =
-                        base_style.fg(Color::Magenta).add_modifier(Modifier::BOLD);
+                    let match_style = base_style.fg(Color::Magenta).add_modifier(Modifier::BOLD);
 
                     let mut spans = vec![Span::styled(
                         if branch_info.is_head { "* " } else { "  " },
-                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
                     )];
                     spans.extend(highlighted_spans(
                         &branch_info.branch_name,

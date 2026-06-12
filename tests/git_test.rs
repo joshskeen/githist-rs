@@ -17,7 +17,10 @@ fn lists_local_branches_with_head_marked() {
     assert!(names.contains(&"feature-a"));
     let main = branches.iter().find(|b| b.branch_name == "main").unwrap();
     assert!(main.is_head);
-    let feature = branches.iter().find(|b| b.branch_name == "feature-a").unwrap();
+    let feature = branches
+        .iter()
+        .find(|b| b.branch_name == "feature-a")
+        .unwrap();
     assert!(!feature.is_head);
 }
 
@@ -53,7 +56,10 @@ fn branches_sort_by_checkout_recency_then_commit_time() {
     let names: Vec<&str> = branches.iter().map(|b| b.branch_name.as_str()).collect();
     // main was checked out last, then feature-b, then feature-a; never-visited has
     // no checkout entry and falls back to commit-time ordering at the end.
-    assert_eq!(names, vec!["main", "feature-b", "feature-a", "never-visited"]);
+    assert_eq!(
+        names,
+        vec!["main", "feature-b", "feature-a", "never-visited"]
+    );
 }
 
 #[test]
@@ -124,7 +130,10 @@ fn githist_stash_roundtrip() {
     let index = githist_repo.find_githist_stash("main").unwrap();
     githist_repo.change_branch("main").unwrap();
     githist_repo.pop_stash(index).unwrap();
-    assert_eq!(fs::read_to_string(dir.path().join("wip.txt")).unwrap(), "wip");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("wip.txt")).unwrap(),
+        "wip"
+    );
     assert!(githist_repo.find_githist_stash("main").is_none());
 }
 
@@ -141,7 +150,10 @@ fn branches_with_pending_githist_stash_are_flagged() {
 
     let branches = githist_repo.get_branch_names().unwrap();
     let main = branches.iter().find(|b| b.branch_name == "main").unwrap();
-    let feature = branches.iter().find(|b| b.branch_name == "feature-a").unwrap();
+    let feature = branches
+        .iter()
+        .find(|b| b.branch_name == "feature-a")
+        .unwrap();
     assert!(main.has_stash);
     assert!(!feature.has_stash);
 }
@@ -177,15 +189,20 @@ fn lists_remote_branches_without_local_counterpart() {
     let dir = tempfile::tempdir().unwrap();
     let repo = init_repo(dir.path());
     let oid = repo.head().unwrap().target().unwrap();
-    repo.reference("refs/remotes/origin/main", oid, false, "test").unwrap();
-    repo.reference("refs/remotes/origin/remote-only", oid, false, "test").unwrap();
+    repo.reference("refs/remotes/origin/main", oid, false, "test")
+        .unwrap();
+    repo.reference("refs/remotes/origin/remote-only", oid, false, "test")
+        .unwrap();
 
     let mut githist_repo = open_githist_repo(dir.path());
     let branches = githist_repo.get_branch_names().unwrap();
     let names: Vec<&str> = branches.iter().map(|b| b.branch_name.as_str()).collect();
     assert!(names.contains(&"origin/remote-only"));
     assert!(!names.contains(&"origin/main")); // shadowed by local main
-    let remote = branches.iter().find(|b| b.branch_name == "origin/remote-only").unwrap();
+    let remote = branches
+        .iter()
+        .find(|b| b.branch_name == "origin/remote-only")
+        .unwrap();
     assert!(remote.is_remote);
 }
 
@@ -193,9 +210,11 @@ fn lists_remote_branches_without_local_counterpart() {
 fn checkout_remote_creates_tracking_branch() {
     let dir = tempfile::tempdir().unwrap();
     let repo = init_repo(dir.path());
-    repo.remote("origin", "https://example.com/repo.git").unwrap();
+    repo.remote("origin", "https://example.com/repo.git")
+        .unwrap();
     let oid = repo.head().unwrap().target().unwrap();
-    repo.reference("refs/remotes/origin/remote-only", oid, false, "test").unwrap();
+    repo.reference("refs/remotes/origin/remote-only", oid, false, "test")
+        .unwrap();
 
     let githist_repo = open_githist_repo(dir.path());
     let local = githist_repo.checkout_remote("origin/remote-only").unwrap();

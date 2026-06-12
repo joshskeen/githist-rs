@@ -30,8 +30,10 @@ pub mod branching {
         now: DateTime<Utc>,
     ) -> (i64, String, String) {
         let last_commit_time = commit.time().seconds();
-        let time_ago = DateTime::from_timestamp(last_commit_time, 0)
-            .map_or_else(|| "unknown".to_string(), |dt| formatter.convert_chrono(dt, now));
+        let time_ago = DateTime::from_timestamp(last_commit_time, 0).map_or_else(
+            || "unknown".to_string(),
+            |dt| formatter.convert_chrono(dt, now),
+        );
         let summary = commit.summary().ok().flatten().unwrap_or("").to_string();
         (last_commit_time, time_ago, summary)
     }
@@ -65,7 +67,9 @@ pub mod branching {
     /// Local branch name for a remote branch like "origin/feature".
     #[must_use]
     pub fn local_branch_name(remote_name: &str) -> &str {
-        remote_name.split_once('/').map_or(remote_name, |(_, suffix)| suffix)
+        remote_name
+            .split_once('/')
+            .map_or(remote_name, |(_, suffix)| suffix)
     }
 
     const STASHABLE_STATUS: Status = Status::INDEX_NEW
@@ -112,11 +116,15 @@ pub mod branching {
             };
             let total = i64::try_from(reflog.len()).unwrap_or(i64::MAX);
             for (idx, entry) in reflog.iter().enumerate() {
-                let Ok(Some(msg)) = entry.message() else { continue };
+                let Ok(Some(msg)) = entry.message() else {
+                    continue;
+                };
                 let Some(rest) = msg.strip_prefix("checkout: moving from ") else {
                     continue;
                 };
-                let Some((_, to)) = rest.split_once(" to ") else { continue };
+                let Some((_, to)) = rest.split_once(" to ") else {
+                    continue;
+                };
                 let rank = total - i64::try_from(idx).unwrap_or(0);
                 map.entry(to.to_string()).or_insert(rank);
             }
@@ -129,11 +137,15 @@ pub mod branching {
             let current = self.head_branch_name();
             let reflog = self.inner.reflog("HEAD").ok()?;
             for entry in reflog.iter() {
-                let Ok(Some(msg)) = entry.message() else { continue };
+                let Ok(Some(msg)) = entry.message() else {
+                    continue;
+                };
                 let Some(rest) = msg.strip_prefix("checkout: moving from ") else {
                     continue;
                 };
-                let Some((from, _)) = rest.split_once(" to ") else { continue };
+                let Some((from, _)) = rest.split_once(" to ") else {
+                    continue;
+                };
                 if Some(from) != current.as_deref()
                     && self.inner.find_branch(from, BranchType::Local).is_ok()
                 {
@@ -144,10 +156,7 @@ pub mod branching {
         }
 
         /// Compute ahead/behind info relative to the remote tracking branch.
-        fn remote_tracking_info(
-            &self,
-            branch_name: &str,
-        ) -> Option<String> {
+        fn remote_tracking_info(&self, branch_name: &str) -> Option<String> {
             let branch = self
                 .inner
                 .find_branch(branch_name, BranchType::Local)
@@ -155,7 +164,10 @@ pub mod branching {
             let upstream = branch.upstream().ok()?;
             let local_oid = branch.get().target()?;
             let upstream_oid = upstream.get().target()?;
-            let (ahead, behind) = self.inner.graph_ahead_behind(local_oid, upstream_oid).ok()?;
+            let (ahead, behind) = self
+                .inner
+                .graph_ahead_behind(local_oid, upstream_oid)
+                .ok()?;
             if ahead == 0 && behind == 0 {
                 Some("up to date".to_string())
             } else {
@@ -271,11 +283,10 @@ pub mod branching {
                 .unwrap_or_else(|| "HEAD".to_string());
             let message = format!("{STASH_MARKER}{current} to {target_branch}");
             let signature = self.inner.signature()?;
-            match self.inner.stash_save(
-                &signature,
-                &message,
-                Some(StashFlags::INCLUDE_UNTRACKED),
-            ) {
+            match self
+                .inner
+                .stash_save(&signature, &message, Some(StashFlags::INCLUDE_UNTRACKED))
+            {
                 Ok(_) => Ok(()),
                 Err(error) if error.code() == ErrorCode::NotFound => Ok(()),
                 Err(error) => Err(error),

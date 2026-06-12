@@ -41,7 +41,10 @@ pub struct App {
 impl StatefulList {
     fn with_items(items: Vec<BranchInfo>) -> StatefulList {
         let filtered = (0..items.len())
-            .map(|index| FilterEntry { index, positions: Vec::new() })
+            .map(|index| FilterEntry {
+                index,
+                positions: Vec::new(),
+            })
             .collect();
         StatefulList {
             state: ListState::default(),
@@ -147,7 +150,11 @@ impl App {
     pub fn get_selected_branch_info(&self) -> Result<BranchInfo, NoSelectionError> {
         let index = self.items.state.selected().ok_or(NoSelectionError)?;
         let entry = self.items.filtered.get(index).ok_or(NoSelectionError)?;
-        self.items.items.get(entry.index).cloned().ok_or(NoSelectionError)
+        self.items
+            .items
+            .get(entry.index)
+            .cloned()
+            .ok_or(NoSelectionError)
     }
 
     /// # Errors

@@ -5,9 +5,23 @@
 
 A text user interface for moving between recent branches in a git repository.
 
-usage: githist followed by an optional path to a repo, defaulting on the working directory. 
+usage: `githist` followed by an optional path to a repo, defaulting to the working directory.
 
-press Q to exit. ↓/↑ to choose branch, ↩ to change to selected branch. type to filter branches.
+Branches are ordered by how recently you checked them out (from the reflog), then by last commit time. Remote-only branches are listed dimmed; selecting one creates a local tracking branch.
+
+### keys
+
+| key | action |
+|-----|--------|
+| `↓`/`↑` or `j`/`k` | choose branch |
+| `↩` | switch to selected branch |
+| `-` | switch to the previously checked-out branch |
+| `/` | fuzzy filter (type to narrow, `↑`/`↓` to move, `↩` to switch, `Esc` to leave) |
+| `Shift+D` | delete branch (warns if not merged into HEAD) |
+| `g`/`G`, `Home`/`End`, `PgUp`/`PgDn` | jump around the list |
+| `q`/`Esc` | quit |
+
+If the working tree is dirty when switching, githist asks whether to stash the changes, bring them along, or cancel. Stashed changes are restored automatically the next time you switch back to the branch (look for the ⚑ stashed marker). Filtering to a name that matches nothing offers to create that branch.
 
 ### demo
 
