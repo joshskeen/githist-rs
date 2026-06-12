@@ -62,6 +62,12 @@ pub mod branching {
 
     const STASH_MARKER: &str = "githist: stash before switching from ";
 
+    /// Local branch name for a remote branch like "origin/feature".
+    #[must_use]
+    pub fn local_branch_name(remote_name: &str) -> &str {
+        remote_name.split_once('/').map_or(remote_name, |(_, suffix)| suffix)
+    }
+
     const STASHABLE_STATUS: Status = Status::INDEX_NEW
         .union(Status::INDEX_MODIFIED)
         .union(Status::INDEX_DELETED)
@@ -175,12 +181,14 @@ pub mod branching {
             let branches = self.inner.branches(Some(BranchType::Local))?;
             let formatter = Formatter::new();
             let now = Utc::now();
+            let mut local_names = HashSet::new();
 
             for branch in branches {
                 let (branch, _) = branch?;
                 let Some(branch_name) = branch.name()?.map(String::from) else {
                     continue; // skip branches with non-UTF8 names
                 };
+                local_names.insert(branch_name.clone());
                 let last_commit = branch.get().peel_to_commit()?;
                 let (last_commit_time, time_ago, summary) =
                     commit_fields(&last_commit, &formatter, now);
@@ -201,6 +209,34 @@ pub mod branching {
                     checkout_rank,
                 });
             }
+
+            for branch in self.inner.branches(Some(BranchType::Remote))? {
+                let (branch, _) = branch?;
+                let Some(branch_name) = branch.name()?.map(String::from) else {
+                    continue;
+                };
+                if branch_name.ends_with("/HEAD") {
+                    continue;
+                }
+                if local_names.contains(local_branch_name(&branch_name)) {
+                    continue;
+                }
+                let last_commit = branch.get().peel_to_commit()?;
+                let (last_commit_time, time_ago, summary) =
+                    commit_fields(&last_commit, &formatter, now);
+                result.push(BranchInfo {
+                    branch_name,
+                    last_commit_time,
+                    time_ago,
+                    summary,
+                    is_head: false,
+                    remote_tracking: None,
+                    is_remote: true,
+                    has_stash: false,
+                    checkout_rank: None,
+                });
+            }
+
             result.sort_by(|a, b| {
                 let ka = (a.checkout_rank.unwrap_or(i64::MIN), a.last_commit_time);
                 let kb = (b.checkout_rank.unwrap_or(i64::MIN), b.last_commit_time);
@@ -326,6 +362,55 @@ pub mod branching {
             self.inner.checkout_tree(&target, None)?;
             self.inner.set_head(&refname)?;
             Ok(())
+        }
+
+        /// True when `branch_name`'s tip is reachable from HEAD.
+        ///
+        /// # Errors
+        ///
+        /// Will return `git2::Error` if the branch or HEAD can't be resolved.
+        pub fn is_merged_into_head(&self, branch_name: &str) -> Result<bool, git2::Error> {
+            let branch = self.inner.find_branch(branch_name, BranchType::Local)?;
+            let branch_oid = branch
+                .get()
+                .target()
+                .ok_or_else(|| git2::Error::from_str("branch has no target"))?;
+            let head_oid = self
+                .inner
+                .head()?
+                .target()
+                .ok_or_else(|| git2::Error::from_str("HEAD has no target"))?;
+            if branch_oid == head_oid {
+                return Ok(true);
+            }
+            self.inner.graph_descendant_of(head_oid, branch_oid)
+        }
+
+        /// Create a branch at HEAD and switch to it.
+        ///
+        /// # Errors
+        ///
+        /// Will return `git2::Error` if creation or checkout failed.
+        pub fn create_branch(&self, name: &str) -> Result<(), git2::Error> {
+            let head = self.inner.head()?.peel_to_commit()?;
+            self.inner.branch(name, &head, false)?;
+            self.change_branch(name)
+        }
+
+        /// Create a local tracking branch for `remote_name` (e.g. "origin/feature")
+        /// and switch to it. Returns the local branch name.
+        ///
+        /// # Errors
+        ///
+        /// Will return `git2::Error` if creation, upstream setup, or checkout failed.
+        pub fn checkout_remote(&self, remote_name: &str) -> Result<String, git2::Error> {
+            let local_name = local_branch_name(remote_name).to_string();
+            let remote_branch = self.inner.find_branch(remote_name, BranchType::Remote)?;
+            let commit = remote_branch.get().peel_to_commit()?;
+            let mut local = self.inner.branch(&local_name, &commit, false)?;
+            local.set_upstream(Some(remote_name))?;
+            self.change_branch(&local_name)?;
+            Ok(local_name)
         }
 
         /// # Errors

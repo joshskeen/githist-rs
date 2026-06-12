@@ -145,3 +145,60 @@ fn branches_with_pending_githist_stash_are_flagged() {
     assert!(main.has_stash);
     assert!(!feature.has_stash);
 }
+
+#[test]
+fn detects_whether_branch_is_merged_into_head() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = init_repo(dir.path());
+    create_branch(&repo, "merged-branch"); // same commit as HEAD
+    let mut githist_repo = open_githist_repo(dir.path());
+    githist_repo.change_branch("merged-branch").unwrap();
+    commit_file_at(&repo, "b.txt", "b", "unmerged work", 1_000_300);
+    githist_repo.change_branch("main").unwrap();
+
+    assert!(!githist_repo.is_merged_into_head("merged-branch").unwrap());
+    // main's tip is an ancestor of merged-branch's tip, not vice versa;
+    // create a branch at HEAD to assert the merged case:
+    create_branch(&repo, "at-head");
+    assert!(githist_repo.is_merged_into_head("at-head").unwrap());
+}
+
+#[test]
+fn creates_and_switches_to_new_branch() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = init_repo(dir.path());
+    let githist_repo = open_githist_repo(dir.path());
+    githist_repo.create_branch("brand-new").unwrap();
+    assert_eq!(repo.head().unwrap().shorthand().ok(), Some("brand-new"));
+}
+
+#[test]
+fn lists_remote_branches_without_local_counterpart() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = init_repo(dir.path());
+    let oid = repo.head().unwrap().target().unwrap();
+    repo.reference("refs/remotes/origin/main", oid, false, "test").unwrap();
+    repo.reference("refs/remotes/origin/remote-only", oid, false, "test").unwrap();
+
+    let mut githist_repo = open_githist_repo(dir.path());
+    let branches = githist_repo.get_branch_names().unwrap();
+    let names: Vec<&str> = branches.iter().map(|b| b.branch_name.as_str()).collect();
+    assert!(names.contains(&"origin/remote-only"));
+    assert!(!names.contains(&"origin/main")); // shadowed by local main
+    let remote = branches.iter().find(|b| b.branch_name == "origin/remote-only").unwrap();
+    assert!(remote.is_remote);
+}
+
+#[test]
+fn checkout_remote_creates_tracking_branch() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = init_repo(dir.path());
+    repo.remote("origin", "https://example.com/repo.git").unwrap();
+    let oid = repo.head().unwrap().target().unwrap();
+    repo.reference("refs/remotes/origin/remote-only", oid, false, "test").unwrap();
+
+    let githist_repo = open_githist_repo(dir.path());
+    let local = githist_repo.checkout_remote("origin/remote-only").unwrap();
+    assert_eq!(local, "remote-only");
+    assert_eq!(repo.head().unwrap().shorthand().ok(), Some("remote-only"));
+}
