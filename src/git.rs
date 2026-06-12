@@ -2,6 +2,7 @@ pub mod branching {
     use chrono::{DateTime, Utc};
     use clap::Parser;
     use git2::{BranchType, ErrorCode, Repository, StashFlags, Status};
+    use std::collections::HashMap;
     use std::time::Duration;
     use timeago::Formatter;
 
@@ -93,6 +94,47 @@ pub mod branching {
             }
         }
 
+        /// Map branch name -> checkout recency rank parsed from the HEAD reflog.
+        /// Higher rank = more recently checked out. Rank is reflog position
+        /// (not timestamp) so same-second checkouts stay ordered.
+        fn checkout_recency(&self) -> HashMap<String, i64> {
+            let mut map = HashMap::new();
+            let Ok(reflog) = self.inner.reflog("HEAD") else {
+                return map;
+            };
+            let total = i64::try_from(reflog.len()).unwrap_or(i64::MAX);
+            for (idx, entry) in reflog.iter().enumerate() {
+                let Ok(Some(msg)) = entry.message() else { continue };
+                let Some(rest) = msg.strip_prefix("checkout: moving from ") else {
+                    continue;
+                };
+                let Some((_, to)) = rest.split_once(" to ") else { continue };
+                let rank = total - i64::try_from(idx).unwrap_or(0);
+                map.entry(to.to_string()).or_insert(rank);
+            }
+            map
+        }
+
+        /// The branch checked out before the current one, like `git checkout -`.
+        #[must_use]
+        pub fn previous_branch(&self) -> Option<String> {
+            let current = self.head_branch_name();
+            let reflog = self.inner.reflog("HEAD").ok()?;
+            for entry in reflog.iter() {
+                let Ok(Some(msg)) = entry.message() else { continue };
+                let Some(rest) = msg.strip_prefix("checkout: moving from ") else {
+                    continue;
+                };
+                let Some((from, _)) = rest.split_once(" to ") else { continue };
+                if Some(from) != current.as_deref()
+                    && self.inner.find_branch(from, BranchType::Local).is_ok()
+                {
+                    return Some(from.to_string());
+                }
+            }
+            None
+        }
+
         /// Compute ahead/behind info relative to the remote tracking branch.
         fn remote_tracking_info(
             &self,
@@ -126,6 +168,7 @@ pub mod branching {
         pub fn get_branch_names(&self) -> Result<Vec<BranchInfo>, git2::Error> {
             let mut result = Vec::new();
             let head_name = self.head_branch_name();
+            let recency = self.checkout_recency();
             let branches = self.inner.branches(Some(BranchType::Local))?;
             let formatter = Formatter::new();
             let now = Utc::now();
@@ -140,6 +183,7 @@ pub mod branching {
                     commit_fields(&last_commit, &formatter, now);
                 let is_head = head_name.as_deref() == Some(branch_name.as_str());
                 let remote_tracking = self.remote_tracking_info(&branch_name);
+                let checkout_rank = recency.get(&branch_name).copied();
 
                 result.push(BranchInfo {
                     branch_name,
@@ -150,11 +194,14 @@ pub mod branching {
                     remote_tracking,
                     is_remote: false,
                     has_stash: false,
-                    checkout_rank: None,
+                    checkout_rank,
                 });
             }
-            result.sort_by_key(|d| d.last_commit_time);
-            result.reverse();
+            result.sort_by(|a, b| {
+                let ka = (a.checkout_rank.unwrap_or(i64::MIN), a.last_commit_time);
+                let kb = (b.checkout_rank.unwrap_or(i64::MIN), b.last_commit_time);
+                kb.cmp(&ka)
+            });
             Ok(result)
         }
 

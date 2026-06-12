@@ -34,3 +34,38 @@ fn branch_info_includes_commit_summary() {
     assert!(!main.has_stash);
     assert!(main.checkout_rank.is_none());
 }
+
+#[test]
+fn branches_sort_by_checkout_recency_then_commit_time() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = init_repo(dir.path());
+    create_branch(&repo, "feature-a");
+    create_branch(&repo, "feature-b");
+    create_branch(&repo, "never-visited");
+
+    let mut githist_repo = open_githist_repo(dir.path());
+    githist_repo.change_branch("feature-a").unwrap();
+    githist_repo.change_branch("feature-b").unwrap();
+    githist_repo.change_branch("main").unwrap();
+
+    let branches = githist_repo.get_branch_names().unwrap();
+    let names: Vec<&str> = branches.iter().map(|b| b.branch_name.as_str()).collect();
+    // main was checked out last, then feature-b, then feature-a; never-visited has
+    // no checkout entry and falls back to commit-time ordering at the end.
+    assert_eq!(names, vec!["main", "feature-b", "feature-a", "never-visited"]);
+}
+
+#[test]
+fn previous_branch_comes_from_reflog() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = init_repo(dir.path());
+    create_branch(&repo, "feature-a");
+
+    let mut githist_repo = open_githist_repo(dir.path());
+    githist_repo.change_branch("feature-a").unwrap();
+    assert_eq!(githist_repo.previous_branch().as_deref(), Some("main"));
+
+    githist_repo.change_branch("main").unwrap();
+    assert_eq!(githist_repo.previous_branch().as_deref(), Some("feature-a"));
+    drop(repo);
+}
