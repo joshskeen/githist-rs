@@ -1,26 +1,21 @@
 pub mod app {
     use crate::git::branching::{local_branch_name, BranchInfo, Config, Repo};
-    use crate::{App, Mode};
+    use crate::{App, AppExit, Mode, TuiTerminal};
     use crossterm::event;
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-    use ratatui::backend::CrosstermBackend;
-    use ratatui::Terminal;
     use std::io;
-    use std::io::Stdout;
     use std::time::{Duration, Instant};
 
     const PAGE_SIZE: usize = 10;
 
-    type Term = Terminal<CrosstermBackend<Stdout>>;
-
     enum Outcome {
         Stay,
-        Exit(Option<String>),
+        Exit(AppExit),
     }
 
     impl App {
-        /// Runs the event loop. Returns a farewell message to print after the
-        /// terminal is restored (`None` when the user just quit).
+        /// Runs the event loop. Returns how the session ended after the terminal
+        /// is restored.
         ///
         /// # Errors
         ///
@@ -29,8 +24,8 @@ pub mod app {
             &mut self,
             config: &Config,
             repo: &mut Repo,
-            terminal: &mut Term,
-        ) -> io::Result<Option<String>> {
+            terminal: &mut TuiTerminal,
+        ) -> io::Result<AppExit> {
             let mut last_tick = Instant::now();
             loop {
                 terminal.draw(|f| self.ui(f))?;
@@ -55,8 +50,8 @@ pub mod app {
                             Mode::Filter => self.handle_filter_mode(key, repo, terminal),
                             Mode::Normal => self.handle_normal_mode(key, repo, terminal),
                         };
-                        if let Outcome::Exit(message) = outcome {
-                            return Ok(message);
+                        if let Outcome::Exit(exit) = outcome {
+                            return Ok(exit);
                         }
                     }
                 }
@@ -106,7 +101,7 @@ pub mod app {
             key: KeyEvent,
             target: &BranchInfo,
             repo: &mut Repo,
-            terminal: &mut Term,
+            terminal: &mut TuiTerminal,
         ) -> Outcome {
             match key.code {
                 KeyCode::Char('s') | KeyCode::Char('S') => {
@@ -138,9 +133,9 @@ pub mod app {
                 KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                     self.mode = Mode::Normal;
                     match repo.create_branch(name) {
-                        Ok(()) => {
-                            Outcome::Exit(Some(format!("created and switched to branch '{name}'")))
-                        }
+                        Ok(()) => Outcome::Exit(AppExit::Farewell(format!(
+                            "created and switched to branch '{name}'"
+                        ))),
                         Err(error) => {
                             self.pending = format!("couldn't create branch '{name}': {error}");
                             Outcome::Stay
@@ -159,7 +154,7 @@ pub mod app {
             &mut self,
             key: KeyEvent,
             repo: &mut Repo,
-            terminal: &mut Term,
+            terminal: &mut TuiTerminal,
         ) -> Outcome {
             match key.code {
                 KeyCode::Esc => {
@@ -200,11 +195,13 @@ pub mod app {
             &mut self,
             key: KeyEvent,
             repo: &mut Repo,
-            terminal: &mut Term,
+            terminal: &mut TuiTerminal,
         ) -> Outcome {
             match key.code {
                 KeyCode::Enter => self.try_switch_selected(repo, terminal),
-                KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => Outcome::Exit(None),
+                KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
+                    Outcome::Exit(AppExit::Quit)
+                }
                 KeyCode::Char('D') if key.modifiers == KeyModifiers::SHIFT => {
                     match self.get_selected_branch_info() {
                         Ok(info) => {
@@ -216,6 +213,11 @@ pub mod app {
                             } else if info.is_remote {
                                 self.pending = format!(
                                     "'{}' is a remote branch; githist only deletes local branches",
+                                    info.branch_name
+                                );
+                            } else if let Some(path) = info.worktree_path {
+                                self.pending = format!(
+                                    "can't delete '{}': checked out in {path}",
                                     info.branch_name
                                 );
                             } else {
@@ -300,7 +302,7 @@ pub mod app {
 
         /// Switch to the selected branch; with no selection but a non-matching
         /// filter, offer to create a branch named after the filter text.
-        fn try_switch_selected(&mut self, repo: &mut Repo, terminal: &mut Term) -> Outcome {
+        fn try_switch_selected(&mut self, repo: &mut Repo, terminal: &mut TuiTerminal) -> Outcome {
             match self.get_selected_branch_info() {
                 Ok(info) => self.request_switch(info, repo, terminal),
                 Err(_) => {
@@ -316,16 +318,20 @@ pub mod app {
             }
         }
 
-        /// Dirty trees prompt for stash/bring/cancel; clean trees switch directly.
+        /// Worktree-held branches exit with the path; dirty trees prompt for
+        /// stash/bring/cancel; clean trees switch directly.
         fn request_switch(
             &mut self,
             target: BranchInfo,
             repo: &mut Repo,
-            terminal: &mut Term,
+            terminal: &mut TuiTerminal,
         ) -> Outcome {
             if target.is_head {
                 self.pending = format!("already on branch '{}'", target.branch_name);
                 return Outcome::Stay;
+            }
+            if let Some(path) = target.worktree_path {
+                return Outcome::Exit(AppExit::WorktreePath(path));
             }
             match repo.is_dirty() {
                 Ok(true) => {
@@ -375,7 +381,7 @@ pub mod app {
                             )),
                         }
                     }
-                    Outcome::Exit(Some(message))
+                    Outcome::Exit(AppExit::Farewell(message))
                 }
                 Err(error) => {
                     self.pending = format!("couldn't switch: {error}");

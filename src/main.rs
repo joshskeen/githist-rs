@@ -3,8 +3,9 @@ use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, LeaveAlternateScreen};
 use githist::git::branching::{Config, Repo};
 use githist::ui::gui::{restore_terminal, setup_terminal};
-use githist::App;
-use std::io;
+use githist::{App, AppExit};
+use std::fs::OpenOptions;
+use std::io::{self, Write};
 use std::panic;
 use std::process::ExitCode;
 
@@ -27,29 +28,49 @@ fn main() -> ExitCode {
         }
     };
 
-    let mut terminal = setup_terminal();
+    let mut terminal = match setup_terminal() {
+        Ok(terminal) => terminal,
+        Err(error) => {
+            eprintln!("couldn't open /dev/tty for the UI: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
 
     // Install panic hook that restores the terminal before printing the panic.
     let original_hook = panic::take_hook();
     panic::set_hook(Box::new(move |panic_info| {
         let _ = disable_raw_mode();
-        let _ = execute!(io::stdout(), LeaveAlternateScreen);
+        if let Ok(mut tty) = OpenOptions::new().write(true).open("/dev/tty") {
+            let _ = execute!(tty, LeaveAlternateScreen);
+        }
         original_hook(panic_info);
     }));
 
     let mut app = App::new(branches);
     app.select_first_item_if_none();
-    let result = app.run_app(&config, &mut repo, &mut terminal);
-    restore_terminal(&mut terminal).expect("couldn't restore terminal!");
-    match result {
-        Ok(Some(message)) => {
+    let exit = match app.run_app(&config, &mut repo, &mut terminal) {
+        Ok(exit) => exit,
+        Err(error) => {
+            eprintln!("{error:?}");
+            let _ = restore_terminal(&mut terminal);
+            return ExitCode::FAILURE;
+        }
+    };
+    if let Err(error) = restore_terminal(&mut terminal) {
+        eprintln!("couldn't restore terminal: {error}");
+        return ExitCode::FAILURE;
+    }
+
+    match exit {
+        AppExit::Quit => ExitCode::SUCCESS,
+        AppExit::Farewell(message) => {
             println!("{message}");
             ExitCode::SUCCESS
         }
-        Ok(None) => ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("{error:?}");
-            ExitCode::FAILURE
+        AppExit::WorktreePath(path) => {
+            println!("{path}");
+            let _ = io::stdout().flush();
+            ExitCode::SUCCESS
         }
     }
 }

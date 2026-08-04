@@ -2,11 +2,25 @@ use crate::git::branching::BranchInfo;
 use ratatui::backend::CrosstermBackend;
 use ratatui::widgets::ListState;
 use ratatui::Terminal;
-use std::io::Stdout;
+use std::fs::File;
 
 pub mod fuzzy;
 pub mod git;
+pub mod path_display;
 pub mod ui;
+
+pub type TuiTerminal = Terminal<CrosstermBackend<File>>;
+
+/// How the TUI session ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AppExit {
+    /// User quit without switching.
+    Quit,
+    /// Checked out or created a branch; message printed after the TUI closes.
+    Farewell(String),
+    /// Selected a branch held in another worktree; path printed alone on stdout.
+    WorktreePath(String),
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Mode {
@@ -175,11 +189,7 @@ impl App {
     }
 
     /// Set a status message and redraw immediately (used before long operations).
-    pub fn show_status(
-        &mut self,
-        terminal: &mut Terminal<CrosstermBackend<Stdout>>,
-        status: String,
-    ) {
+    pub fn show_status(&mut self, terminal: &mut TuiTerminal, status: String) {
         self.pending = status;
         terminal.draw(|f| self.ui(f)).expect("error updating!");
     }
@@ -196,7 +206,7 @@ impl App {
             })
             .collect();
         if !self.filter.is_empty() {
-            scored.sort_by(|a, b| b.0.cmp(&a.0));
+            scored.sort_by_key(|b| std::cmp::Reverse(b.0));
         }
         self.items.filtered = scored.into_iter().map(|(_, entry)| entry).collect();
         if self.items.filtered.is_empty() {
@@ -227,6 +237,7 @@ mod tests {
             is_remote: false,
             has_stash: false,
             checkout_rank: None,
+            worktree_path: None,
         }
     }
 
