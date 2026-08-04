@@ -1,4 +1,4 @@
-use git2::{Repository, Signature, Time};
+use git2::{BranchType, Repository, Signature, Time, WorktreeAddOptions};
 use githist::git::branching::{Config, Repo};
 use std::fs;
 use std::path::Path;
@@ -44,6 +44,14 @@ pub fn commit_file_at(
 pub fn create_branch(repo: &Repository, name: &str) {
     let head = repo.head().unwrap().peel_to_commit().unwrap();
     repo.branch(name, &head, false).unwrap();
+}
+
+pub fn add_worktree_for_branch(repo: &Repository, wt_name: &str, wt_path: &Path, branch: &str) {
+    let branch = repo.find_branch(branch, BranchType::Local).unwrap();
+    let reference = branch.into_reference();
+    let mut opts = WorktreeAddOptions::new();
+    opts.reference(Some(&reference));
+    repo.worktree(wt_name, wt_path, Some(&opts)).unwrap();
 }
 
 pub fn open_githist_repo(dir: &Path) -> Repo {

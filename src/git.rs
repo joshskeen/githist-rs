@@ -3,6 +3,7 @@ pub mod branching {
     use clap::Parser;
     use git2::{BranchType, ErrorCode, Repository, StashFlags, Status};
     use std::collections::{HashMap, HashSet};
+    use std::path::{Path, PathBuf};
     use std::time::Duration;
     use timeago::Formatter;
 
@@ -22,6 +23,8 @@ pub mod branching {
         pub has_stash: bool,
         /// Reflog-derived checkout recency; higher = more recently checked out.
         pub checkout_rank: Option<i64>,
+        /// Absolute path of another worktree that has this branch checked out.
+        pub worktree_path: Option<String>,
     }
 
     fn commit_fields(
@@ -87,6 +90,20 @@ pub mod branching {
         status.intersects(STASHABLE_STATUS) && !status.contains(Status::IGNORED)
     }
 
+    fn normalize_workdir(path: &Path) -> PathBuf {
+        let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        canonical.components().as_path().to_path_buf()
+    }
+
+    fn head_branch_of(repo: &Repository) -> Option<String> {
+        let head = repo.head().ok()?;
+        if head.is_branch() {
+            head.shorthand().ok().map(String::from)
+        } else {
+            None
+        }
+    }
+
     impl Repo {
         /// # Errors
         ///
@@ -98,12 +115,7 @@ pub mod branching {
 
         /// Returns the name of the current HEAD branch, or None if detached.
         fn head_branch_name(&self) -> Option<String> {
-            let head = self.inner.head().ok()?;
-            if head.is_branch() {
-                head.shorthand().ok().map(String::from)
-            } else {
-                None
-            }
+            head_branch_of(&self.inner)
         }
 
         /// Map branch name -> checkout recency rank parsed from the HEAD reflog.
@@ -190,6 +202,7 @@ pub mod branching {
             let head_name = self.head_branch_name();
             let recency = self.checkout_recency();
             let stashed = self.stashed_branches();
+            let worktree_paths = self.other_worktree_paths()?;
             let branches = self.inner.branches(Some(BranchType::Local))?;
             let formatter = Formatter::new();
             let now = Utc::now();
@@ -208,6 +221,7 @@ pub mod branching {
                 let remote_tracking = self.remote_tracking_info(&branch_name);
                 let checkout_rank = recency.get(&branch_name).copied();
                 let has_stash = stashed.contains(&branch_name);
+                let worktree_path = worktree_paths.get(&branch_name).cloned();
 
                 result.push(BranchInfo {
                     branch_name,
@@ -219,6 +233,7 @@ pub mod branching {
                     is_remote: false,
                     has_stash,
                     checkout_rank,
+                    worktree_path,
                 });
             }
 
@@ -246,6 +261,7 @@ pub mod branching {
                     is_remote: true,
                     has_stash: false,
                     checkout_rank: None,
+                    worktree_path: None,
                 });
             }
 
@@ -333,27 +349,50 @@ pub mod branching {
             &self,
             branch_name: &str,
         ) -> Result<Option<String>, git2::Error> {
-            let refname = format!("refs/heads/{branch_name}");
-            let current_workdir = self.inner.workdir().map(std::path::PathBuf::from);
-            let worktrees = self.inner.worktrees()?;
+            Ok(self.other_worktree_paths()?.get(branch_name).cloned())
+        }
 
+        /// Map local branch name → absolute path of the worktree where it is checked out,
+        /// excluding the current worktree.
+        fn other_worktree_paths(&self) -> Result<HashMap<String, String>, git2::Error> {
+            let mut map = HashMap::new();
+            let current_workdir = self.inner.workdir().map(normalize_workdir);
+
+            let mut record = |repo: &Repository, path: &Path| {
+                let normalized = normalize_workdir(path);
+                if current_workdir.as_ref() == Some(&normalized) {
+                    return;
+                }
+                if let Some(name) = head_branch_of(repo) {
+                    map.insert(name, normalized.display().to_string());
+                }
+            };
+
+            // Main working tree (git2's worktrees() list omits it).
+            if let Ok(main_repo) = Repository::open(self.inner.commondir()) {
+                if let Some(wd) = main_repo.workdir() {
+                    record(&main_repo, wd);
+                }
+            }
+
+            let worktrees = self.inner.worktrees()?;
             for i in 0..worktrees.len() {
                 let Some(wt_name) = worktrees.get(i)? else {
                     continue;
                 };
                 let wt = self.inner.find_worktree(wt_name)?;
-                let wt_path = wt.path();
-                if current_workdir.as_deref() == Some(wt_path) {
-                    continue;
-                }
-                let wt_repo = Repository::open_from_worktree(&wt)?;
-                let head = wt_repo.head()?;
-                if head.name()? == refname {
-                    return Ok(Some(wt_path.display().to_string()));
-                }
+                let wt_path = wt.path().to_path_buf();
+                let wt_repo = match Repository::open(&wt_path) {
+                    Ok(repo) => repo,
+                    Err(_) => match Repository::open_from_worktree(&wt) {
+                        Ok(repo) => repo,
+                        Err(_) => continue,
+                    },
+                };
+                record(&wt_repo, &wt_path);
             }
 
-            Ok(None)
+            Ok(map)
         }
 
         /// # Errors
