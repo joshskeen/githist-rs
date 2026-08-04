@@ -14,7 +14,7 @@ Branches are ordered by how recently you checked them out (from the reflog), the
 | key | action |
 |-----|--------|
 | `↓`/`↑` or `j`/`k` | choose branch |
-| `↩` | switch to selected branch |
+| `↩` | switch to selected branch, or print the worktree path when the branch is checked out elsewhere |
 | `-` | switch to the previously checked-out branch |
 | `/` | fuzzy filter (type to narrow, `↑`/`↓` to move, `↩` to switch, `Esc` to leave) |
 | `Shift+D` | delete branch (warns if not merged into HEAD) |
@@ -22,6 +22,8 @@ Branches are ordered by how recently you checked them out (from the reflog), the
 | `q`/`Esc` | quit |
 
 If the working tree is dirty when switching, githist asks whether to stash the changes, bring them along, or cancel. Stashed changes are restored automatically the next time you switch back to the branch (look for the ⚑ stashed marker). Filtering to a name that matches nothing offers to create that branch.
+
+Branches checked out in another git worktree show a magenta `W` gutter marker and a truncated path; press `↩` on one to exit and print its absolute path on stdout (for `cd "$(githist)"` wrappers). The TUI renders on `/dev/tty` so stdout stays clean for that path.
 
 ### demo
 
