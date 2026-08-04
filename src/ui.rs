@@ -1,33 +1,38 @@
 pub mod run;
 
 pub mod gui {
-    use crate::{App, Mode};
+    use crate::path_display::format_worktree_path;
+    use crate::{App, Mode, TuiTerminal};
     use crossterm::execute;
     use crossterm::terminal::{
         disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
     };
-    use ratatui::backend::CrosstermBackend;
     use ratatui::layout::{Constraint, Direction, Layout};
     use ratatui::style::{Color, Modifier, Style};
     use ratatui::text::{Line, Span};
     use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
-    use ratatui::{Frame, Terminal};
-    use std::io;
-    use std::io::Stdout;
+    use ratatui::Frame;
+    use std::fs::OpenOptions;
+    use std::io::{self, Write};
 
-    pub fn setup_terminal() -> Terminal<CrosstermBackend<Stdout>> {
-        enable_raw_mode().expect("failed to enter raw mode!");
-        let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen).expect("failed to setup terminal!");
-        let backend = CrosstermBackend::new(stdout);
-        Terminal::new(backend).expect("failed to instance terminal")
+    /// Open the controlling terminal for the TUI so stdout stays free for path emission.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `/dev/tty` cannot be opened or the terminal cannot be set up.
+    pub fn setup_terminal() -> io::Result<TuiTerminal> {
+        let mut tty = OpenOptions::new().read(true).write(true).open("/dev/tty")?;
+        enable_raw_mode()?;
+        execute!(tty, EnterAlternateScreen)?;
+        let backend = ratatui::backend::CrosstermBackend::new(tty);
+        ratatui::Terminal::new(backend).map_err(io::Error::other)
     }
 
-    pub fn restore_terminal(
-        terminal: &mut Terminal<CrosstermBackend<Stdout>>,
-    ) -> Result<(), io::Error> {
+    pub fn restore_terminal(terminal: &mut TuiTerminal) -> Result<(), io::Error> {
         disable_raw_mode()?;
-        execute!(terminal.backend_mut(), LeaveAlternateScreen,)?;
+        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+        // Ensure leave-alternate-screen is flushed before we print to stdout.
+        terminal.backend_mut().flush()?;
         Ok(())
     }
 
@@ -74,7 +79,6 @@ pub mod gui {
                 .direction(Direction::Vertical)
                 .split(f.area());
 
-            // get the longest of all the branch names including ones not currently displayed necessarily.
             let largest_string_len = self
                 .items
                 .items
@@ -82,6 +86,9 @@ pub mod gui {
                 .map(|x| x.branch_name.chars().count())
                 .max()
                 .unwrap_or(0);
+
+            let row_width = chunks[0].width as usize;
+            let path_budget = row_width.saturating_sub(largest_string_len + 60);
 
             let items: Vec<ListItem> = self
                 .items
@@ -96,12 +103,20 @@ pub mod gui {
                     };
                     let match_style = base_style.fg(Color::Magenta).add_modifier(Modifier::BOLD);
 
-                    let mut spans = vec![Span::styled(
-                        if branch_info.is_head { "* " } else { "  " },
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD),
-                    )];
+                    let (marker, marker_style) = if branch_info.is_head {
+                        (
+                            "* ",
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        )
+                    } else if branch_info.worktree_path.is_some() {
+                        ("W ", Style::default().fg(Color::Magenta))
+                    } else {
+                        ("  ", Style::default())
+                    };
+
+                    let mut spans = vec![Span::styled(marker, marker_style)];
                     spans.extend(highlighted_spans(
                         &branch_info.branch_name,
                         &entry.positions,
@@ -132,6 +147,15 @@ pub mod gui {
                             Style::default().fg(Color::Cyan),
                         ));
                     }
+                    if let Some(path) = branch_info.worktree_path.as_deref() {
+                        if path_budget >= 8 {
+                            let shown = format_worktree_path(path, path_budget);
+                            spans.push(Span::styled(
+                                format!("  {shown}"),
+                                Style::default().fg(Color::DarkGray),
+                            ));
+                        }
+                    }
                     ListItem::new(Line::from(spans))
                 })
                 .collect();
@@ -153,18 +177,14 @@ pub mod gui {
                 )
                 .highlight_symbol(">> ");
 
-            let instructions_text = "q/Esc: quit | j/k/\u{2193}/\u{2191}: navigate | \u{21a9}: switch | -: previous branch | Shift+D: delete | /: filter | g/G: first/last";
+            let instructions_text = "q/Esc: quit | j/k/\u{2193}/\u{2191}: navigate | \u{21a9}: switch or open worktree | -: previous branch | Shift+D: delete | /: filter | g/G: first/last";
             let instructions_para = Paragraph::new(instructions_text)
                 .block(Block::default().borders(Borders::NONE))
                 .wrap(Wrap { trim: true });
 
-            // list of branches
             f.render_stateful_widget(items, chunks[0], &mut self.items.state);
-
-            // instructions
             f.render_widget(instructions_para, chunks[1]);
 
-            // status bar: pending status, or a mode-specific prompt
             let status_text = self.status_line();
             if !status_text.is_empty() {
                 let status_para = Paragraph::new(status_text)
@@ -206,13 +226,19 @@ pub mod gui {
                     format!("create branch '{name}' and switch to it? [y/n]")
                 }
                 Mode::Normal => {
-                    if self.filter.is_empty() {
-                        String::new()
-                    } else {
+                    if !self.filter.is_empty() {
                         format!(
                             "filter: {} (press / to edit, Backspace to clear)",
                             self.filter
                         )
+                    } else if let Ok(info) = self.get_selected_branch_info() {
+                        if let Some(path) = &info.worktree_path {
+                            format!("worktree: {path}")
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        String::new()
                     }
                 }
             }

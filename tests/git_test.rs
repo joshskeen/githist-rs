@@ -1,6 +1,7 @@
 mod common;
 
 use common::*;
+use git2::Repository;
 use std::fs;
 
 #[test]
@@ -220,4 +221,58 @@ fn checkout_remote_creates_tracking_branch() {
     let local = githist_repo.checkout_remote("origin/remote-only").unwrap();
     assert_eq!(local, "remote-only");
     assert_eq!(repo.head().unwrap().shorthand().ok(), Some("remote-only"));
+}
+
+#[test]
+fn linked_worktree_branch_is_annotated_from_main() {
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path();
+    let repo = init_repo(main_path);
+    create_branch(&repo, "feature");
+
+    let wt_path = dir.path().join("feature-wt");
+    add_worktree_for_branch(&repo, "feature-wt", &wt_path, "feature");
+
+    let mut githist_repo = open_githist_repo(main_path);
+    let branches = githist_repo.get_branch_names().unwrap();
+    let feature = branches
+        .iter()
+        .find(|b| b.branch_name == "feature")
+        .expect("feature branch");
+    let head = branches.iter().find(|b| b.is_head).expect("head branch");
+
+    assert!(head.worktree_path.is_none());
+    let expected = fs::canonicalize(&wt_path).unwrap();
+    let actual =
+        fs::canonicalize(feature.worktree_path.as_ref().expect("worktree path")).unwrap();
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn main_worktree_branch_is_annotated_from_linked_worktree() {
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path();
+    let repo = init_repo(main_path);
+    create_branch(&repo, "feature");
+
+    let wt_path = dir.path().join("feature-wt");
+    add_worktree_for_branch(&repo, "feature-wt", &wt_path, "feature");
+
+    let mut githist_repo = open_githist_repo(&wt_path);
+    let branches = githist_repo.get_branch_names().unwrap();
+    let head_here = branches.iter().find(|b| b.is_head).unwrap();
+    assert_eq!(head_here.branch_name, "feature");
+    assert!(head_here.worktree_path.is_none());
+
+    let main_repo = Repository::open(main_path).unwrap();
+    let default_name = main_repo.head().unwrap().shorthand().unwrap().to_string();
+    let default_branch = branches
+        .iter()
+        .find(|b| b.branch_name == default_name)
+        .expect("default branch");
+    assert!(default_branch.worktree_path.is_some(), "{branches:?}");
+    let expected = fs::canonicalize(main_path).unwrap();
+    let actual =
+        fs::canonicalize(default_branch.worktree_path.as_ref().unwrap()).unwrap();
+    assert_eq!(actual, expected);
 }

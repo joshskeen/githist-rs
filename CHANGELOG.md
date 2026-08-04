@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-04
+
+### Added
+
+- Annotate branches checked out in another worktree with a magenta `W` gutter marker and truncated path; status bar shows the full path when selected
+- Press Enter on a worktree-held branch to exit and print its absolute path on stdout (no checkout), for `cd "$(githist)"` wrappers
+- Render the TUI on `/dev/tty` so stdout stays clean for worktree path emission
+- Block deleting a branch that is checked out in another worktree
+- Include the main worktree when detecting worktree-held branches (git2's `worktrees()` omits it)
+
 ## [0.6.0] - 2026-06-12
 
 ### Added
@@ -83,7 +93,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Migrate from tui-rs to ratatui
 - Show branch switch status in the TUI before switching ([#2](https://github.com/joshskeen/githist-rs/pull/2))
 
-[Unreleased]: https://github.com/joshskeen/githist-rs/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/joshskeen/githist-rs/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/joshskeen/githist-rs/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/joshskeen/githist-rs/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/joshskeen/githist-rs/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/joshskeen/githist-rs/compare/v0.3.0...v0.4.0
