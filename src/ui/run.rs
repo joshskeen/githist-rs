@@ -358,16 +358,16 @@ pub mod app {
                     let session_id = sessions[selected].session_id.clone();
                     self.agent_store.unlink(&branch_name, &session_id);
                     if let Err(error) = self.agent_store.save(&store_path(&self.repo_id)) {
+                        // Re-link in memory so UI matches disk after a failed save.
+                        if let Some(session) = sessions.iter().find(|s| s.session_id == session_id)
+                        {
+                            self.agent_store.link(
+                                &branch_name,
+                                &session.session_id,
+                                session.title.clone(),
+                            );
+                        }
                         self.pending = format!("couldn't save agent link store: {error}");
-                    } else {
-                        self.pending.clear();
-                    }
-                    sessions.retain(|s| s.session_id != session_id);
-                    if sessions.is_empty() {
-                        self.mode = Mode::Normal;
-                        Outcome::Exit(skip_resume_exit(post_nav))
-                    } else {
-                        let selected = selected.min(sessions.len() - 1);
                         self.mode = Mode::ResumeAgent {
                             branch_name,
                             sessions,
@@ -375,6 +375,22 @@ pub mod app {
                             post_nav,
                         };
                         Outcome::Stay
+                    } else {
+                        self.pending.clear();
+                        sessions.retain(|s| s.session_id != session_id);
+                        if sessions.is_empty() {
+                            self.mode = Mode::Normal;
+                            Outcome::Exit(skip_resume_exit(post_nav))
+                        } else {
+                            let selected = selected.min(sessions.len() - 1);
+                            self.mode = Mode::ResumeAgent {
+                                branch_name,
+                                sessions,
+                                selected,
+                                post_nav,
+                            };
+                            Outcome::Stay
+                        }
                     }
                 }
                 _ => Outcome::Stay,
