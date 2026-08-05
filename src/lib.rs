@@ -4,6 +4,7 @@ use ratatui::widgets::ListState;
 use ratatui::Terminal;
 use std::fs::File;
 
+pub mod agent_store;
 pub mod fuzzy;
 pub mod git;
 pub mod path_display;
