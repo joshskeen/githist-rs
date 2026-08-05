@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Link Cursor Agent CLI sessions to branches with `Shift+A`; persisted per repo in `~/.config/githist/<repo-id>/agents.json`
+- Resume linked sessions after switching with `a` (skippable picker); `Enter` unchanged
+- Dim cyan `a` gutter marker and conditional help when links exist; no agent UI when the store is empty
+- Unlink sessions with `u` in the resume picker
+- Honor `CURSOR_AGENT_SESSION_ID` when linking; `GITHIST_CONFIG_DIR` overrides the config directory
+
 ## [0.7.0] - 2026-08-04
 
 ### Added
