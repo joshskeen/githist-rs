@@ -1,8 +1,40 @@
 mod common;
 
 use common::*;
+use githist::agent_store::{repo_id_from_path, repo_id_from_remote};
 use git2::Repository;
 use std::fs;
+
+#[test]
+fn repo_id_prefers_normalized_origin_remote() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = init_repo(dir.path());
+    repo.remote("origin", "https://github.com/user/repo.git")
+        .unwrap();
+
+    let githist_repo = open_githist_repo(dir.path());
+    assert_eq!(
+        githist_repo.remote_origin_url().as_deref(),
+        Some("https://github.com/user/repo.git")
+    );
+    assert_eq!(
+        githist_repo.repo_id(),
+        repo_id_from_remote("https://github.com/user/repo.git")
+    );
+}
+
+#[test]
+fn repo_id_falls_back_to_toplevel_path_hash_without_origin() {
+    let dir = tempfile::tempdir().unwrap();
+    init_repo(dir.path());
+
+    let githist_repo = open_githist_repo(dir.path());
+    assert!(githist_repo.remote_origin_url().is_none());
+    assert_eq!(
+        githist_repo.repo_id(),
+        repo_id_from_path(&githist_repo.workdir_path())
+    );
+}
 
 #[test]
 fn lists_local_branches_with_head_marked() {

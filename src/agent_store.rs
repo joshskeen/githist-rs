@@ -61,6 +61,26 @@ pub fn repo_id_from_remote(url: &str) -> String {
         .collect()
 }
 
+/// Stable FNV-1a 64-bit hash (independent of Rust's `DefaultHasher`).
+fn fnv1a64(data: &[u8]) -> u64 {
+    const OFFSET: u64 = 0xcbf29ce484222325;
+    const PRIME: u64 = 0x100000001b3;
+    let mut hash = OFFSET;
+    for &b in data {
+        hash ^= u64::from(b);
+        hash = hash.wrapping_mul(PRIME);
+    }
+    hash
+}
+
+/// Filesystem-safe repo identifier derived from a local toplevel/workdir path.
+pub fn repo_id_from_path(path: &Path) -> String {
+    let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let normalized = canonical.components().as_path();
+    let bytes = normalized.as_os_str().as_encoded_bytes();
+    format!("path_{:016x}", fnv1a64(bytes))
+}
+
 fn config_root() -> PathBuf {
     if let Ok(dir) = std::env::var("GITHIST_CONFIG_DIR") {
         return PathBuf::from(dir);
@@ -147,6 +167,15 @@ mod tests {
             normalize_remote_url("https://example.com/foo/"),
             "https://example.com/foo"
         );
+    }
+
+    #[test]
+    fn repo_id_from_path_is_stable_and_filesystem_safe() {
+        let dir = TempDir::new().unwrap();
+        let id = repo_id_from_path(dir.path());
+        assert_eq!(id, repo_id_from_path(dir.path()));
+        assert!(id.starts_with("path_"));
+        assert!(id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'));
     }
 
     #[test]

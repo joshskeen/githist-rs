@@ -1,8 +1,10 @@
+use crate::agent_store::AgentStore;
 use crate::git::branching::BranchInfo;
 use ratatui::backend::CrosstermBackend;
 use ratatui::widgets::ListState;
 use ratatui::Terminal;
 use std::fs::File;
+use std::path::PathBuf;
 
 pub mod agent_store;
 pub mod fuzzy;
@@ -51,6 +53,9 @@ pub struct App {
     pub filter: String,
     pub mode: Mode,
     pub pending: String,
+    pub agent_store: AgentStore,
+    pub repo_id: String,
+    pub repo_cwd: PathBuf,
 }
 
 impl StatefulList {
@@ -144,12 +149,20 @@ pub struct NoSelectionError;
 
 impl App {
     #[must_use]
-    pub fn new(branches: Vec<BranchInfo>) -> App {
+    pub fn new(
+        branches: Vec<BranchInfo>,
+        agent_store: AgentStore,
+        repo_id: String,
+        repo_cwd: PathBuf,
+    ) -> App {
         App {
             items: StatefulList::with_items(branches),
             filter: String::new(),
             mode: Mode::Normal,
             pending: String::new(),
+            agent_store,
+            repo_id,
+            repo_cwd,
         }
     }
 
@@ -243,7 +256,12 @@ mod tests {
     }
 
     fn app_with(names: &[&str]) -> App {
-        App::new(names.iter().map(|n| branch(n)).collect())
+        App::new(
+            names.iter().map(|n| branch(n)).collect(),
+            AgentStore::default(),
+            "test-repo".to_string(),
+            PathBuf::from("/tmp/test-repo"),
+        )
     }
 
     #[test]
