@@ -1,4 +1,4 @@
-use crate::agent_store::AgentStore;
+use crate::agent_store::{AgentStore, LinkedSession};
 use crate::git::branching::BranchInfo;
 use ratatui::backend::CrosstermBackend;
 use ratatui::widgets::ListState;
@@ -6,6 +6,7 @@ use ratatui::Terminal;
 use std::fs::File;
 use std::path::PathBuf;
 
+pub mod acp_sessions;
 pub mod agent_store;
 pub mod fuzzy;
 pub mod git;
@@ -23,6 +24,25 @@ pub enum AppExit {
     Farewell(String),
     /// Selected a branch held in another worktree; path printed alone on stdout.
     WorktreePath(String),
+    /// Resume a linked agent session after switching branches.
+    ResumeAgent {
+        session_id: String,
+        cwd: PathBuf,
+    },
+}
+
+/// What to do when the user skips the resume picker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PostNav {
+    Farewell(String),
+    WorktreePath(String),
+}
+
+/// Whether branch navigation should offer a resume picker afterward.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SwitchIntent {
+    Enter,
+    ThenResume,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +52,18 @@ pub enum Mode {
     ConfirmDelete { branch_name: String, merged: bool },
     DirtyPrompt { target: BranchInfo },
     ConfirmCreate { name: String },
+    LinkAgent {
+        branch_name: String,
+        candidates: Vec<LinkedSession>,
+        selected: usize,
+        paste_buffer: String,
+    },
+    ResumeAgent {
+        branch_name: String,
+        sessions: Vec<LinkedSession>,
+        selected: usize,
+        post_nav: PostNav,
+    },
 }
 
 /// One visible row: an index into `StatefulList::items` plus the char
@@ -56,6 +88,8 @@ pub struct App {
     pub agent_store: AgentStore,
     pub repo_id: String,
     pub repo_cwd: PathBuf,
+    /// Set when the user presses `a` to switch then resume; cleared on cancel or picker entry.
+    pub after_switch_resume: bool,
 }
 
 impl StatefulList {
@@ -163,6 +197,7 @@ impl App {
             agent_store,
             repo_id,
             repo_cwd,
+            after_switch_resume: false,
         }
     }
 
@@ -236,6 +271,30 @@ impl App {
     }
 }
 
+/// Resolve the exit when the user skips the resume picker.
+#[must_use]
+pub fn skip_resume_exit(post_nav: PostNav) -> AppExit {
+    match post_nav {
+        PostNav::Farewell(message) => AppExit::Farewell(message),
+        PostNav::WorktreePath(path) => AppExit::WorktreePath(path),
+    }
+}
+
+/// Working directory for `agent --resume` after a branch switch.
+#[must_use]
+pub fn resume_cwd(post_nav: &PostNav, repo_cwd: &std::path::Path) -> PathBuf {
+    match post_nav {
+        PostNav::WorktreePath(path) => PathBuf::from(path),
+        PostNav::Farewell(_) => repo_cwd.to_path_buf(),
+    }
+}
+
+/// Whether navigation should enter the resume picker instead of exiting.
+#[must_use]
+pub fn should_enter_resume_picker(intent: SwitchIntent, after_switch_resume: bool) -> bool {
+    matches!(intent, SwitchIntent::ThenResume) || after_switch_resume
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -306,5 +365,37 @@ mod tests {
         // "alpha" and "alpine" both match contiguously at position 0 and tie
         // on score, so the original order is kept; index 1 is "alpine".
         assert_eq!(name, "alpine");
+    }
+
+    #[test]
+    fn should_enter_resume_picker_for_then_resume_intent() {
+        assert!(should_enter_resume_picker(SwitchIntent::ThenResume, false));
+        assert!(!should_enter_resume_picker(SwitchIntent::Enter, false));
+        assert!(should_enter_resume_picker(SwitchIntent::Enter, true));
+    }
+
+    #[test]
+    fn skip_resume_exit_maps_post_nav() {
+        assert_eq!(
+            skip_resume_exit(PostNav::Farewell("hi".to_string())),
+            AppExit::Farewell("hi".to_string())
+        );
+        assert_eq!(
+            skip_resume_exit(PostNav::WorktreePath("/wt".to_string())),
+            AppExit::WorktreePath("/wt".to_string())
+        );
+    }
+
+    #[test]
+    fn resume_cwd_uses_worktree_or_repo() {
+        let repo = PathBuf::from("/repo");
+        assert_eq!(
+            resume_cwd(&PostNav::WorktreePath("/wt".to_string()), &repo),
+            PathBuf::from("/wt")
+        );
+        assert_eq!(
+            resume_cwd(&PostNav::Farewell("ok".to_string()), &repo),
+            repo
+        );
     }
 }

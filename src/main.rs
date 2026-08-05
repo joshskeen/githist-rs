@@ -83,5 +83,9 @@ fn main() -> ExitCode {
             let _ = io::stdout().flush();
             ExitCode::SUCCESS
         }
+        AppExit::ResumeAgent { session_id, cwd } => {
+            eprintln!("resume {} in {}", session_id, cwd.display());
+            ExitCode::SUCCESS
+        }
     }
 }

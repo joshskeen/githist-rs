@@ -264,6 +264,50 @@ pub mod gui {
                 Mode::ConfirmCreate { name } => {
                     format!("create branch '{name}' and switch to it? [y/n]")
                 }
+                Mode::LinkAgent {
+                    branch_name,
+                    candidates,
+                    selected,
+                    paste_buffer,
+                } => {
+                    if candidates.is_empty() {
+                        format!(
+                            "link agent to '{branch_name}': paste session id and press Enter [{paste_buffer}_]"
+                        )
+                    } else {
+                        let label = candidates
+                            .get(*selected)
+                            .map(|s| s.title.as_deref().unwrap_or(&s.session_id))
+                            .unwrap_or("?");
+                        format!(
+                            "link agent to '{branch_name}' [{}/{}]: {label} (Enter to link, Esc to cancel)",
+                            selected + 1,
+                            candidates.len()
+                        )
+                    }
+                }
+                Mode::ResumeAgent {
+                    branch_name,
+                    sessions,
+                    selected,
+                    ..
+                } => {
+                    if sessions.is_empty() {
+                        format!(
+                            "no linked sessions for '{branch_name}' (Esc/q to continue without resume)"
+                        )
+                    } else {
+                        let label = sessions
+                            .get(*selected)
+                            .map(|s| s.title.as_deref().unwrap_or(&s.session_id))
+                            .unwrap_or("?");
+                        format!(
+                            "resume agent for '{branch_name}' [{}/{}]: {label} (Enter to resume, Esc/q to skip)",
+                            selected + 1,
+                            sessions.len()
+                        )
+                    }
+                }
                 Mode::Normal => {
                     if !self.filter.is_empty() {
                         format!(

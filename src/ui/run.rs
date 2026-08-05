@@ -1,6 +1,11 @@
 pub mod app {
+    use crate::acp_sessions::{current_session_from_env, list_candidates, save_link};
+    use crate::agent_store::LinkedSession;
     use crate::git::branching::{local_branch_name, BranchInfo, Config, Repo};
-    use crate::{App, AppExit, Mode, TuiTerminal};
+    use crate::{
+        resume_cwd, should_enter_resume_picker, skip_resume_exit, App, AppExit, Mode, PostNav,
+        SwitchIntent, TuiTerminal,
+    };
     use crossterm::event;
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     use std::io;
@@ -47,6 +52,30 @@ pub mod app {
                             Mode::ConfirmCreate { name } => {
                                 self.handle_confirm_create(key, &name, repo)
                             }
+                            Mode::LinkAgent {
+                                branch_name,
+                                candidates,
+                                selected,
+                                paste_buffer,
+                            } => self.handle_link_agent(
+                                key,
+                                branch_name,
+                                candidates,
+                                selected,
+                                paste_buffer,
+                            ),
+                            Mode::ResumeAgent {
+                                branch_name,
+                                sessions,
+                                selected,
+                                post_nav,
+                            } => self.handle_resume_agent(
+                                key,
+                                branch_name,
+                                sessions,
+                                selected,
+                                post_nav,
+                            ),
                             Mode::Filter => self.handle_filter_mode(key, repo, terminal),
                             Mode::Normal => self.handle_normal_mode(key, repo, terminal),
                         };
@@ -112,6 +141,7 @@ pub mod app {
                     );
                     if let Err(error) = repo.stash_changes(&target.branch_name) {
                         self.pending = format!("couldn't stash changes: {error}");
+                        self.after_switch_resume = false;
                         return Outcome::Stay;
                     }
                     self.perform_switch(target, repo)
@@ -122,6 +152,7 @@ pub mod app {
                 }
                 KeyCode::Char('c') | KeyCode::Char('C') | KeyCode::Esc => {
                     self.mode = Mode::Normal;
+                    self.after_switch_resume = false;
                     Outcome::Stay
                 }
                 _ => Outcome::Stay,
@@ -150,6 +181,183 @@ pub mod app {
             }
         }
 
+        fn handle_link_agent(
+            &mut self,
+            key: KeyEvent,
+            branch_name: String,
+            candidates: Vec<LinkedSession>,
+            selected: usize,
+            paste_buffer: String,
+        ) -> Outcome {
+            match key.code {
+                KeyCode::Esc => {
+                    self.mode = Mode::Normal;
+                    self.pending.clear();
+                    Outcome::Stay
+                }
+                KeyCode::Up | KeyCode::Char('k') if !candidates.is_empty() => {
+                    let selected = if selected == 0 {
+                        candidates.len() - 1
+                    } else {
+                        selected - 1
+                    };
+                    self.mode = Mode::LinkAgent {
+                        branch_name,
+                        candidates,
+                        selected,
+                        paste_buffer,
+                    };
+                    Outcome::Stay
+                }
+                KeyCode::Down | KeyCode::Char('j') if !candidates.is_empty() => {
+                    let selected = (selected + 1) % candidates.len();
+                    self.mode = Mode::LinkAgent {
+                        branch_name,
+                        candidates,
+                        selected,
+                        paste_buffer,
+                    };
+                    Outcome::Stay
+                }
+                KeyCode::Enter => {
+                    let session = if candidates.is_empty() {
+                        let session_id = paste_buffer.trim().to_string();
+                        if session_id.is_empty() {
+                            self.pending = "enter a session id to link".to_string();
+                            self.mode = Mode::LinkAgent {
+                                branch_name,
+                                candidates,
+                                selected,
+                                paste_buffer,
+                            };
+                            return Outcome::Stay;
+                        }
+                        LinkedSession {
+                            session_id,
+                            title: None,
+                            linked_at: chrono::Utc::now().to_rfc3339(),
+                        }
+                    } else {
+                        match candidates.get(selected).cloned() {
+                            Some(session) => session,
+                            None => {
+                                self.pending = "no session selected".to_string();
+                                self.mode = Mode::LinkAgent {
+                                    branch_name,
+                                    candidates,
+                                    selected,
+                                    paste_buffer,
+                                };
+                                return Outcome::Stay;
+                            }
+                        }
+                    };
+                    match save_link(
+                        &mut self.agent_store,
+                        &self.repo_id,
+                        &branch_name,
+                        &session,
+                    ) {
+                        Ok(()) => {
+                            self.mode = Mode::Normal;
+                            let label = session
+                                .title
+                                .as_deref()
+                                .unwrap_or(&session.session_id);
+                            self.pending =
+                                format!("linked agent session to '{branch_name}': {label}");
+                        }
+                        Err(error) => {
+                            self.pending = format!("couldn't save agent link: {error}");
+                            self.mode = Mode::LinkAgent {
+                                branch_name,
+                                candidates,
+                                selected,
+                                paste_buffer,
+                            };
+                        }
+                    }
+                    Outcome::Stay
+                }
+                KeyCode::Backspace if candidates.is_empty() => {
+                    let mut paste_buffer = paste_buffer;
+                    paste_buffer.pop();
+                    self.mode = Mode::LinkAgent {
+                        branch_name,
+                        candidates,
+                        selected,
+                        paste_buffer,
+                    };
+                    Outcome::Stay
+                }
+                KeyCode::Char(c)
+                    if candidates.is_empty()
+                        && (key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT) =>
+                {
+                    let mut paste_buffer = paste_buffer;
+                    paste_buffer.push(c);
+                    self.mode = Mode::LinkAgent {
+                        branch_name,
+                        candidates,
+                        selected,
+                        paste_buffer,
+                    };
+                    Outcome::Stay
+                }
+                _ => Outcome::Stay,
+            }
+        }
+
+        fn handle_resume_agent(
+            &mut self,
+            key: KeyEvent,
+            branch_name: String,
+            sessions: Vec<LinkedSession>,
+            selected: usize,
+            post_nav: PostNav,
+        ) -> Outcome {
+            let mut selected = selected;
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                    self.mode = Mode::Normal;
+                    Outcome::Exit(skip_resume_exit(post_nav))
+                }
+                KeyCode::Up | KeyCode::Char('k') if !sessions.is_empty() => {
+                    if selected == 0 {
+                        selected = sessions.len() - 1;
+                    } else {
+                        selected -= 1;
+                    }
+                    self.mode = Mode::ResumeAgent {
+                        branch_name,
+                        sessions,
+                        selected,
+                        post_nav,
+                    };
+                    Outcome::Stay
+                }
+                KeyCode::Down | KeyCode::Char('j') if !sessions.is_empty() => {
+                    selected = (selected + 1) % sessions.len();
+                    self.mode = Mode::ResumeAgent {
+                        branch_name,
+                        sessions,
+                        selected,
+                        post_nav,
+                    };
+                    Outcome::Stay
+                }
+                KeyCode::Enter if !sessions.is_empty() => {
+                    let session = &sessions[selected];
+                    let cwd = resume_cwd(&post_nav, &self.repo_cwd);
+                    Outcome::Exit(AppExit::ResumeAgent {
+                        session_id: session.session_id.clone(),
+                        cwd,
+                    })
+                }
+                _ => Outcome::Stay,
+            }
+        }
+
         fn handle_filter_mode(
             &mut self,
             key: KeyEvent,
@@ -163,7 +371,7 @@ pub mod app {
                 }
                 KeyCode::Enter => {
                     self.mode = Mode::Normal;
-                    self.try_switch_selected(repo, terminal)
+                    self.try_switch_selected(repo, terminal, SwitchIntent::Enter)
                 }
                 KeyCode::Up => {
                     self.items.previous();
@@ -198,9 +406,59 @@ pub mod app {
             terminal: &mut TuiTerminal,
         ) -> Outcome {
             match key.code {
-                KeyCode::Enter => self.try_switch_selected(repo, terminal),
+                KeyCode::Enter => self.try_switch_selected(repo, terminal, SwitchIntent::Enter),
                 KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
                     Outcome::Exit(AppExit::Quit)
+                }
+                KeyCode::Char('a') if key.modifiers.is_empty() => {
+                    match self.get_selected_branch_info() {
+                        Ok(info) => {
+                            let has_links = self
+                                .agent_store
+                                .sessions_for(&info.branch_name)
+                                .is_some_and(|sessions| !sessions.is_empty());
+                            if !has_links {
+                                self.pending =
+                                    "no agent linked; Shift+A to link".to_string();
+                                Outcome::Stay
+                            } else {
+                                self.after_switch_resume = true;
+                                self.request_switch(
+                                    info,
+                                    repo,
+                                    terminal,
+                                    SwitchIntent::ThenResume,
+                                )
+                            }
+                        }
+                        Err(_) => {
+                            self.pending = "no selection, nothing to do!".to_string();
+                            Outcome::Stay
+                        }
+                    }
+                }
+                KeyCode::Char('A') if key.modifiers == KeyModifiers::SHIFT => {
+                    match self.get_selected_branch_info() {
+                        Ok(info) => {
+                            let mut candidates = list_candidates(&self.repo_cwd, 20);
+                            if let Some(current) = current_session_from_env() {
+                                candidates.retain(|c| c.session_id != current.session_id);
+                                candidates.insert(0, current);
+                            }
+                            self.mode = Mode::LinkAgent {
+                                branch_name: info.branch_name,
+                                candidates,
+                                selected: 0,
+                                paste_buffer: String::new(),
+                            };
+                            self.pending.clear();
+                            Outcome::Stay
+                        }
+                        Err(_) => {
+                            self.pending = "no selection, nothing to link!".to_string();
+                            Outcome::Stay
+                        }
+                    }
                 }
                 KeyCode::Char('D') if key.modifiers == KeyModifiers::SHIFT => {
                     match self.get_selected_branch_info() {
@@ -250,7 +508,12 @@ pub mod app {
                             .find(|b| !b.is_remote && b.branch_name == prev)
                             .cloned();
                         match info {
-                            Some(info) => self.request_switch(info, repo, terminal),
+                            Some(info) => self.request_switch(
+                                info,
+                                repo,
+                                terminal,
+                                SwitchIntent::Enter,
+                            ),
                             None => {
                                 self.pending =
                                     format!("previous branch '{prev}' is not in the list");
@@ -302,9 +565,14 @@ pub mod app {
 
         /// Switch to the selected branch; with no selection but a non-matching
         /// filter, offer to create a branch named after the filter text.
-        fn try_switch_selected(&mut self, repo: &mut Repo, terminal: &mut TuiTerminal) -> Outcome {
+        fn try_switch_selected(
+            &mut self,
+            repo: &mut Repo,
+            terminal: &mut TuiTerminal,
+            intent: SwitchIntent,
+        ) -> Outcome {
             match self.get_selected_branch_info() {
-                Ok(info) => self.request_switch(info, repo, terminal),
+                Ok(info) => self.request_switch(info, repo, terminal, intent),
                 Err(_) => {
                     if !self.filter.is_empty() && self.filtered_len() == 0 {
                         self.mode = Mode::ConfirmCreate {
@@ -318,6 +586,23 @@ pub mod app {
             }
         }
 
+        fn enter_resume_agent(&mut self, branch_name: String, post_nav: PostNav) -> Outcome {
+            self.after_switch_resume = false;
+            let sessions = self
+                .agent_store
+                .sessions_for(&branch_name)
+                .map(<[LinkedSession]>::to_vec)
+                .unwrap_or_default();
+            self.mode = Mode::ResumeAgent {
+                branch_name,
+                sessions,
+                selected: 0,
+                post_nav,
+            };
+            self.pending.clear();
+            Outcome::Stay
+        }
+
         /// Worktree-held branches exit with the path; dirty trees prompt for
         /// stash/bring/cancel; clean trees switch directly.
         fn request_switch(
@@ -325,12 +610,21 @@ pub mod app {
             target: BranchInfo,
             repo: &mut Repo,
             terminal: &mut TuiTerminal,
+            intent: SwitchIntent,
         ) -> Outcome {
             if target.is_head {
+                self.after_switch_resume = false;
                 self.pending = format!("already on branch '{}'", target.branch_name);
                 return Outcome::Stay;
             }
             if let Some(path) = target.worktree_path {
+                if should_enter_resume_picker(intent, self.after_switch_resume) {
+                    return self.enter_resume_agent(
+                        target.branch_name,
+                        PostNav::WorktreePath(path),
+                    );
+                }
+                self.after_switch_resume = false;
                 return Outcome::Exit(AppExit::WorktreePath(path));
             }
             match repo.is_dirty() {
@@ -346,6 +640,7 @@ pub mod app {
                     self.perform_switch(&target, repo)
                 }
                 Err(error) => {
+                    self.after_switch_resume = false;
                     self.pending = format!("couldn't check working tree status: {error}");
                     Outcome::Stay
                 }
@@ -381,9 +676,16 @@ pub mod app {
                             )),
                         }
                     }
+                    if self.after_switch_resume {
+                        return self.enter_resume_agent(
+                            target.branch_name.clone(),
+                            PostNav::Farewell(message),
+                        );
+                    }
                     Outcome::Exit(AppExit::Farewell(message))
                 }
                 Err(error) => {
+                    self.after_switch_resume = false;
                     self.pending = format!("couldn't switch: {error}");
                     Outcome::Stay
                 }
