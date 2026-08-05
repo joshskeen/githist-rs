@@ -1,6 +1,7 @@
 use clap::Parser;
 use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, LeaveAlternateScreen};
+use githist::agent_store::{self, AgentStore};
 use githist::git::branching::{Config, Repo};
 use githist::ui::gui::{restore_terminal, setup_terminal};
 use githist::{App, AppExit};
@@ -46,7 +47,17 @@ fn main() -> ExitCode {
         original_hook(panic_info);
     }));
 
-    let mut app = App::new(branches);
+    let repo_id = repo.repo_id();
+    let repo_cwd = repo.workdir_path();
+    let agent_store = match AgentStore::load(&agent_store::store_path(&repo_id)) {
+        Ok(store) => store,
+        Err(error) => {
+            eprintln!("warning: couldn't load agent link store: {error}");
+            AgentStore::default()
+        }
+    };
+
+    let mut app = App::new(branches, agent_store, repo_id, repo_cwd);
     app.select_first_item_if_none();
     let exit = match app.run_app(&config, &mut repo, &mut terminal) {
         Ok(exit) => exit,
@@ -71,6 +82,49 @@ fn main() -> ExitCode {
             println!("{path}");
             let _ = io::stdout().flush();
             ExitCode::SUCCESS
+        }
+        AppExit::ResumeAgent { session_id, cwd } => {
+            if let Err(err) = std::env::set_current_dir(&cwd) {
+                eprintln!(
+                    "branch already switched; couldn't chdir to {}: {err}",
+                    cwd.display()
+                );
+                return ExitCode::FAILURE;
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt;
+                let err = std::process::Command::new("agent")
+                    .arg("--resume")
+                    .arg(&session_id)
+                    .exec();
+                eprintln!("couldn't exec agent: {err}");
+                ExitCode::FAILURE
+            }
+            #[cfg(not(unix))]
+            {
+                match std::process::Command::new("agent")
+                    .arg("--resume")
+                    .arg(&session_id)
+                    .spawn()
+                {
+                    Ok(mut child) => match child.wait() {
+                        Ok(status) if status.success() => ExitCode::SUCCESS,
+                        Ok(status) => {
+                            eprintln!("couldn't exec agent: agent exited with {status}");
+                            ExitCode::FAILURE
+                        }
+                        Err(err) => {
+                            eprintln!("couldn't exec agent: {err}");
+                            ExitCode::FAILURE
+                        }
+                    },
+                    Err(err) => {
+                        eprintln!("couldn't exec agent: {err}");
+                        ExitCode::FAILURE
+                    }
+                }
+            }
         }
     }
 }

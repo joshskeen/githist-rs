@@ -616,6 +616,8 @@ dependencies = [
  "crossterm",
  "git2",
  "ratatui",
+ "serde",
+ "serde_json",
  "tempfile",
  "timeago",
 ]

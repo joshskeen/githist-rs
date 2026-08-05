@@ -1,6 +1,34 @@
 pub mod run;
 
+use ratatui::style::{Color, Modifier, Style};
+
+/// Gutter marker for a branch row.
+///
+/// Priority: head (`*`) > worktree (`W`) > agent (`a`) > blank.
+pub fn branch_gutter(is_head: bool, has_worktree: bool, has_agent: bool) -> (&'static str, Style) {
+    if is_head {
+        (
+            "* ",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )
+    } else if has_worktree {
+        ("W ", Style::default().fg(Color::Magenta))
+    } else if has_agent {
+        (
+            "a ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::DIM),
+        )
+    } else {
+        ("  ", Style::default())
+    }
+}
+
 pub mod gui {
+    use crate::ui::branch_gutter;
     use crate::path_display::format_worktree_path;
     use crate::{App, Mode, TuiTerminal};
     use crossterm::execute;
@@ -103,18 +131,15 @@ pub mod gui {
                     };
                     let match_style = base_style.fg(Color::Magenta).add_modifier(Modifier::BOLD);
 
-                    let (marker, marker_style) = if branch_info.is_head {
-                        (
-                            "* ",
-                            Style::default()
-                                .fg(Color::Yellow)
-                                .add_modifier(Modifier::BOLD),
-                        )
-                    } else if branch_info.worktree_path.is_some() {
-                        ("W ", Style::default().fg(Color::Magenta))
-                    } else {
-                        ("  ", Style::default())
-                    };
+                    let has_agent = self
+                        .agent_store
+                        .sessions_for(&branch_info.branch_name)
+                        .is_some_and(|sessions| !sessions.is_empty());
+                    let (marker, marker_style) = branch_gutter(
+                        branch_info.is_head,
+                        branch_info.worktree_path.is_some(),
+                        has_agent,
+                    );
 
                     let mut spans = vec![Span::styled(marker, marker_style)];
                     spans.extend(highlighted_spans(
@@ -177,7 +202,21 @@ pub mod gui {
                 )
                 .highlight_symbol(">> ");
 
-            let instructions_text = "q/Esc: quit | j/k/\u{2193}/\u{2191}: navigate | \u{21a9}: switch or open worktree | -: previous branch | Shift+D: delete | /: filter | g/G: first/last";
+            let base_help = "q/Esc: quit | j/k/\u{2193}/\u{2191}: navigate | \u{21a9}: switch or open worktree | -: previous branch | Shift+D: delete | /: filter | g/G: first/last";
+            let show_agent_help = self.agent_store.has_any_links()
+                || self
+                    .get_selected_branch_info()
+                    .ok()
+                    .is_some_and(|info| {
+                        self.agent_store
+                            .sessions_for(&info.branch_name)
+                            .is_some_and(|sessions| !sessions.is_empty())
+                    });
+            let instructions_text = if show_agent_help {
+                format!("{base_help} | a: resume agent | A: link session")
+            } else {
+                base_help.to_string()
+            };
             let instructions_para = Paragraph::new(instructions_text)
                 .block(Block::default().borders(Borders::NONE))
                 .wrap(Wrap { trim: true });
@@ -225,6 +264,50 @@ pub mod gui {
                 Mode::ConfirmCreate { name } => {
                     format!("create branch '{name}' and switch to it? [y/n]")
                 }
+                Mode::LinkAgent {
+                    branch_name,
+                    candidates,
+                    selected,
+                    paste_buffer,
+                } => {
+                    if candidates.is_empty() {
+                        format!(
+                            "link agent to '{branch_name}': paste session id and press Enter [{paste_buffer}_]"
+                        )
+                    } else {
+                        let label = candidates
+                            .get(*selected)
+                            .map(|s| s.title.as_deref().unwrap_or(&s.session_id))
+                            .unwrap_or("?");
+                        format!(
+                            "link agent to '{branch_name}' [{}/{}]: {label} (Enter to link, Esc to cancel)",
+                            selected + 1,
+                            candidates.len()
+                        )
+                    }
+                }
+                Mode::ResumeAgent {
+                    branch_name,
+                    sessions,
+                    selected,
+                    ..
+                } => {
+                    if sessions.is_empty() {
+                        format!(
+                            "no linked sessions for '{branch_name}' (Esc/q to continue without resume)"
+                        )
+                    } else {
+                        let label = sessions
+                            .get(*selected)
+                            .map(|s| s.title.as_deref().unwrap_or(&s.session_id))
+                            .unwrap_or("?");
+                        format!(
+                            "resume agent for '{branch_name}' [{}/{}]: {label} (Enter to resume, u: unlink, Esc/q to skip)",
+                            selected + 1,
+                            sessions.len()
+                        )
+                    }
+                }
                 Mode::Normal => {
                     if !self.filter.is_empty() {
                         format!(
@@ -232,16 +315,64 @@ pub mod gui {
                             self.filter
                         )
                     } else if let Ok(info) = self.get_selected_branch_info() {
+                        let session_count = self
+                            .agent_store
+                            .sessions_for(&info.branch_name)
+                            .map_or(0, |sessions| sessions.len());
+                        let mut parts = Vec::new();
                         if let Some(path) = &info.worktree_path {
-                            format!("worktree: {path}")
-                        } else {
-                            String::new()
+                            parts.push(format!("worktree: {path}"));
                         }
+                        if session_count > 0 {
+                            let label = if session_count == 1 {
+                                "agent: 1 linked session".to_string()
+                            } else {
+                                format!("agent: {session_count} linked sessions")
+                            };
+                            parts.push(label);
+                        }
+                        parts.join(" | ")
                     } else {
                         String::new()
                     }
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::branch_gutter;
+    use ratatui::style::{Color, Modifier, Style};
+
+    #[test]
+    fn branch_gutter_head_beats_worktree_and_agent() {
+        let (marker, style) = branch_gutter(true, true, true);
+        assert_eq!(marker, "* ");
+        assert_eq!(style.fg, Some(Color::Yellow));
+        assert!(style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn branch_gutter_worktree_beats_agent() {
+        let (marker, style) = branch_gutter(false, true, true);
+        assert_eq!(marker, "W ");
+        assert_eq!(style.fg, Some(Color::Magenta));
+    }
+
+    #[test]
+    fn branch_gutter_agent_when_no_head_or_worktree() {
+        let (marker, style) = branch_gutter(false, false, true);
+        assert_eq!(marker, "a ");
+        assert_eq!(style.fg, Some(Color::Cyan));
+        assert!(style.add_modifier.contains(Modifier::DIM));
+    }
+
+    #[test]
+    fn branch_gutter_blank_when_nothing() {
+        let (marker, style) = branch_gutter(false, false, false);
+        assert_eq!(marker, "  ");
+        assert_eq!(style, Style::default());
     }
 }

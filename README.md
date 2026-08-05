@@ -25,6 +25,29 @@ If the working tree is dirty when switching, githist asks whether to stash the c
 
 Branches checked out in another git worktree show a magenta `W` gutter marker and a truncated path; press `↩` on one to exit and print its absolute path on stdout (for `cd "$(githist)"` wrappers). The TUI renders on `/dev/tty` so stdout stays clean for that path.
 
+### Agent sessions
+
+Linking Cursor Agent CLI sessions to branches is opt-in. With no links saved, githist looks and behaves exactly as before — no extra markers, help text, or prompts.
+
+Once you link sessions:
+
+| key | action |
+|-----|--------|
+| `Shift+A` | link the selected branch to an agent session (recent sessions for this repo, or paste a session id) |
+| `a` | switch to the selected branch, then show a skippable resume picker if that branch has links |
+| `↩` | unchanged — switch or print worktree path; never opens the resume picker |
+
+Branches with linked sessions show a dim cyan `a` gutter marker (when not `*` or `W`). Help mentions `a` / `Shift+A` only when this repo has any links or the selected row has links.
+
+In the resume picker: `↩` runs `agent --resume <id>` in the target directory; `Esc`/`q` skips resume and exits with the usual farewell or worktree path; `u` unlinks the selected session. Resuming does not print on stdout, so `cd "$(githist)"` wrappers keep working.
+
+Links are stored per repository at `~/.config/githist/<repo-id>/agents.json` (repo id from normalized `origin` URL, or a hash of the toplevel path when there is no remote).
+
+Optional environment variables:
+
+- `CURSOR_AGENT_SESSION_ID` — when set, prepends that session as the first link candidate
+- `GITHIST_CONFIG_DIR` — override the config directory (default `~/.config`)
+
 ### demo
 
 

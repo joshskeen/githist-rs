@@ -113,6 +113,35 @@ pub mod branching {
             Ok(Repo { inner })
         }
 
+        /// Absolute path of this repository's working tree (or `.git` for bare repos).
+        #[must_use]
+        pub fn workdir_path(&self) -> PathBuf {
+            if let Some(wd) = self.inner.workdir() {
+                normalize_workdir(wd)
+            } else {
+                normalize_workdir(self.inner.path())
+            }
+        }
+
+        /// URL of the `origin` remote, if configured.
+        #[must_use]
+        pub fn remote_origin_url(&self) -> Option<String> {
+            self.inner
+                .find_remote("origin")
+                .ok()
+                .and_then(|remote| remote.url().ok().map(String::from))
+        }
+
+        /// Stable per-repo identifier for agent link storage.
+        #[must_use]
+        pub fn repo_id(&self) -> String {
+            if let Some(url) = self.remote_origin_url() {
+                crate::agent_store::repo_id_from_remote(&url)
+            } else {
+                crate::agent_store::repo_id_from_path(&self.workdir_path())
+            }
+        }
+
         /// Returns the name of the current HEAD branch, or None if detached.
         fn head_branch_name(&self) -> Option<String> {
             head_branch_of(&self.inner)
