@@ -1,6 +1,6 @@
 pub mod app {
     use crate::acp_sessions::{current_session_from_env, list_candidates, save_link};
-    use crate::agent_store::LinkedSession;
+    use crate::agent_store::{store_path, LinkedSession};
     use crate::git::branching::{local_branch_name, BranchInfo, Config, Repo};
     use crate::{
         resume_cwd, should_enter_resume_picker, skip_resume_exit, App, AppExit, Mode, PostNav,
@@ -312,7 +312,7 @@ pub mod app {
             &mut self,
             key: KeyEvent,
             branch_name: String,
-            sessions: Vec<LinkedSession>,
+            mut sessions: Vec<LinkedSession>,
             selected: usize,
             post_nav: PostNav,
         ) -> Outcome {
@@ -353,6 +353,29 @@ pub mod app {
                         session_id: session.session_id.clone(),
                         cwd,
                     })
+                }
+                KeyCode::Char('u') | KeyCode::Char('U') if !sessions.is_empty() => {
+                    let session_id = sessions[selected].session_id.clone();
+                    self.agent_store.unlink(&branch_name, &session_id);
+                    if let Err(error) = self.agent_store.save(&store_path(&self.repo_id)) {
+                        self.pending = format!("couldn't save agent link store: {error}");
+                    } else {
+                        self.pending.clear();
+                    }
+                    sessions.retain(|s| s.session_id != session_id);
+                    if sessions.is_empty() {
+                        self.mode = Mode::Normal;
+                        Outcome::Exit(skip_resume_exit(post_nav))
+                    } else {
+                        let selected = selected.min(sessions.len() - 1);
+                        self.mode = Mode::ResumeAgent {
+                            branch_name,
+                            sessions,
+                            selected,
+                            post_nav,
+                        };
+                        Outcome::Stay
+                    }
                 }
                 _ => Outcome::Stay,
             }

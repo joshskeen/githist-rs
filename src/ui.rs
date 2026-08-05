@@ -302,7 +302,7 @@ pub mod gui {
                             .map(|s| s.title.as_deref().unwrap_or(&s.session_id))
                             .unwrap_or("?");
                         format!(
-                            "resume agent for '{branch_name}' [{}/{}]: {label} (Enter to resume, Esc/q to skip)",
+                            "resume agent for '{branch_name}' [{}/{}]: {label} (Enter to resume, u: unlink, Esc/q to skip)",
                             selected + 1,
                             sessions.len()
                         )
