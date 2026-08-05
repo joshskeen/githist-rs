@@ -52,8 +52,13 @@ pub fn normalize_remote_url(url: &str) -> String {
 /// Filesystem-safe repo identifier derived from a normalized remote URL.
 pub fn repo_id_from_remote(url: &str) -> String {
     normalize_remote_url(url)
-        .replace("://", "_")
-        .replace('/', "_")
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '@' | '?' | '*' | '<' | '>' | '|' | '"' => '_',
+            c if c.is_control() => '_',
+            c => c,
+        })
+        .collect()
 }
 
 fn config_root() -> PathBuf {
@@ -72,13 +77,13 @@ pub fn store_path(repo_id: &str) -> PathBuf {
 }
 
 impl AgentStore {
-    pub fn load(path: &Path) -> Self {
+    pub fn load(path: &Path) -> io::Result<Self> {
         let contents = match fs::read_to_string(path) {
             Ok(c) => c,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Self::default(),
-            Err(_) => return Self::default(),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Self::default()),
+            Err(e) => return Err(e),
         };
-        serde_json::from_str(&contents).unwrap_or_default()
+        serde_json::from_str(&contents).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 
     pub fn save(&self, path: &Path) -> io::Result<()> {
@@ -145,13 +150,35 @@ mod tests {
     }
 
     #[test]
+    fn repo_id_from_remote_https_and_ssh() {
+        assert_eq!(
+            repo_id_from_remote("https://github.com/user/repo.git"),
+            "https___github.com_user_repo"
+        );
+        assert_eq!(
+            repo_id_from_remote("git@github.com:user/repo.git"),
+            "git_github.com_user_repo"
+        );
+    }
+
+    #[test]
     fn missing_file_loads_empty_store() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("agents.json");
-        let store = AgentStore::load(&path);
+        let store = AgentStore::load(&path).unwrap();
         assert_eq!(store.schema, 1);
         assert!(store.branches.is_empty());
         assert!(!store.has_any_links());
+    }
+
+    #[test]
+    fn corrupt_json_returns_err() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("agents.json");
+        fs::write(&path, "{ not valid json").unwrap();
+
+        let err = AgentStore::load(&path).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
     }
 
     #[test]
@@ -159,7 +186,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("agents.json");
 
-        let mut store = AgentStore::load(&path);
+        let mut store = AgentStore::load(&path).unwrap();
         store.link(
             "feature/foo",
             "f61f674e-03fe-4c67-b1c6-d1538221a9d4",
@@ -167,7 +194,7 @@ mod tests {
         );
         store.save(&path).unwrap();
 
-        let loaded = AgentStore::load(&path);
+        let loaded = AgentStore::load(&path).unwrap();
         let sessions = loaded.sessions_for("feature/foo").unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(
@@ -181,6 +208,48 @@ mod tests {
         assert!(store.sessions_for("feature/foo").is_none());
 
         assert!(loaded.has_any_links());
+    }
+
+    #[test]
+    fn unlink_save_load_roundtrip_clears_links() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("agents.json");
+
+        let mut store = AgentStore::load(&path).unwrap();
+        store.link("main", "session-a", None);
+        store.save(&path).unwrap();
+
+        store.unlink("main", "session-a");
+        store.save(&path).unwrap();
+
+        let loaded = AgentStore::load(&path).unwrap();
+        assert!(loaded.sessions_for("main").is_none());
+        assert!(!loaded.has_any_links());
+    }
+
+    #[test]
+    fn relink_same_session_updates_order_and_linked_at() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("agents.json");
+
+        let mut store = AgentStore::load(&path).unwrap();
+        store.link("main", "session-a", Some("first".to_string()));
+        let original_linked_at = store.sessions_for("main").unwrap()[0].linked_at.clone();
+        store.link("main", "session-b", Some("second".to_string()));
+        assert_eq!(
+            store.sessions_for("main").unwrap()[0].session_id,
+            "session-b"
+        );
+
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        store.link("main", "session-a", Some("first again".to_string()));
+
+        let sessions = store.sessions_for("main").unwrap();
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(sessions[0].session_id, "session-a");
+        assert_eq!(sessions[0].title.as_deref(), Some("first again"));
+        assert_eq!(sessions[1].session_id, "session-b");
+        assert_ne!(sessions[0].linked_at, original_linked_at);
     }
 
     #[test]
